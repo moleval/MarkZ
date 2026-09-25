@@ -40,11 +40,35 @@
     "Вид"
     "Видимость2"))
 
-;; 31 буква (без Ё и О)
+;; 29 букв: нет Ё, Й, З, О. После Я — АА, АБ, … БА, ББ. Не останавливаемся.
 (setq *mark:letters*
   '("А" "Б" "В" "Г" "Д" "Е" "Ж" "И"
     "К" "Л" "М" "Н" "П" "Р" "С" "Т" "У" "Ф"
     "Х" "Ц" "Ч" "Ш" "Щ" "Ъ" "Ы" "Ь" "Э" "Ю" "Я"))
+
+(defun mark:letter-at (n / base len span start off digits d ch)
+  (setq base (length *mark:letters*))
+  (cond
+    ((or (null n) (not (numberp n)) (< n 0) (<= base 0))
+     nil)
+    ((< n base)
+     (nth (fix n) *mark:letters*))
+    (t
+     (setq len   1
+           span  base
+           start 0)
+     (while (and (< len 4) (>= n (+ start span)))
+       (setq start (+ start span)
+             len   (1+ len)
+             span  (* span base)))
+     (setq off    (fix (- n start))
+           digits nil)
+     (repeat len
+       (setq d      (rem off base)
+             off    (/ off base)
+             ch     (nth d *mark:letters*)
+             digits (cons (if ch ch "") digits)))
+     (apply 'strcat digits))))
 
 ;; Специальные Visibility > приписка (без дефиса, нижний регистр)
 (setq *mark:specials*
@@ -78,7 +102,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 32")
+(setq *mark:rev*    "Ред. 33")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1075,22 +1099,13 @@
        (mark:out "Нет корректных значений ширины/высоты.")
        (mark:note-error))))
 
-  ;; TEST 10 — буквы по высотам (не больше 31)
+  ;; TEST 10 — буквы по высотам. После списка продолжаем АА, АБ, … БА, ББ.
   (mark:out "")
-  (cond
-    ((<= (length hlist) (length *mark:letters*))
-     (progn
-       (mark:out "[TEST 10] Буквенная маркировка — OK")
-       (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))
-       (mark:out
-         (strcat "Доступно букв: " (itoa (length *mark:letters*))))))
-    (t
-     (progn
-       (mark:out "[TEST 10] Буквенная маркировка — ERROR")
-       (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))
-       (mark:out (strcat "Доступно букв: " (itoa (length *mark:letters*))))
-       (mark:out "[ERROR] Маркировка остановлена: недостаточно букв.")
-       (mark:note-error))))
+  (mark:out "[TEST 10] Буквенная маркировка — OK")
+  (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))
+  (mark:out
+    (strcat "Букв в списке: " (itoa (length *mark:letters*))
+            ". Дальше АА, АБ, … БА, ББ."))
 
   ;; TEST 11 — номера по ширинам
   (mark:out "")
@@ -1165,7 +1180,7 @@
           iw     (if w (mark:index-of *mark:widths* w) nil)
           ih     (if h (mark:index-of *mark:heights* h) nil)
           ;; буква — вертикальная рядовка (высота), номер — горизонтальная (ширина)
-          letter (if ih (nth ih *mark:letters*) nil)
+          letter (if ih (mark:letter-at ih) nil)
           hnum   (if iw (1+ iw) nil)
           suffix (mark:get-special-suffix (mark:rec-get r 'vis))
           m      (if (and letter hnum)
@@ -2784,8 +2799,10 @@
     ;; не оставлять букву/номер из старой Марки: индекс только от размера
     (setq letter ""
           num    "")
-    (if (and ih (< ih (length *mark:letters*)))
-      (setq letter (strcase (nth ih *mark:letters*))))
+    (if ih
+      (setq letter (mark:letter-at ih)))
+    (if (mark:strp letter)
+      (setq letter (strcase letter)))
     (if iw
       (setq num (itoa (1+ iw))))
     (setq out
@@ -3373,11 +3390,9 @@
 ;;;=====================================================================
 ;;;  МАРКАБЛОК / MARKFILL — вставка «Заполнение в витраж» по ячейкам
 ;;;  Режимы, в этом порядке:
-;;;    Сетка (мультилинии)
-;;;    Точка (мультилинии)
-;;;    Точка (динамика)
-;;;    Полилинии
-;;;  Вставка: левый нижний угол, W/H = габарит ячейки.
+;;;    Сетка-мультилинии, Точка-мультилинии, Сетка-динамика,
+;;;    Точка-динамика, Полилинии
+;;;  Вставка: точный левый нижний угол. W/H блока — до миллиметра.
 ;;;  Атрибуты обнуляются — пользователь заполняет сам.
 ;;;=====================================================================
 
@@ -4289,10 +4304,8 @@
     (setq sy (cdr sy)))
   (if (and sx (> (length sx) 1) (< (car sx) 50.0) (> (cadr sx) 1000.0))
     (setq sx (cdr sx)))
-  (setq tmp nil)
-  (foreach v sx (setq tmp (cons (mark:round1 v) tmp)))
-  (setq sx  (reverse tmp)
-        nxs (length sx)
+  ;; Оси не округляем: угол вставки сетки — точная координата.
+  (setq nxs (length sx)
         nys (length sy)
         out nil)
   ;; Проходим по каждому вертикальному пролету [x0 .. x1]
@@ -4321,10 +4334,7 @@
         ;; Никакого фолбэка на чужие глобальные ригели!
         (if (and col-sy (>= (length col-sy) 2))
           (progn
-            (setq tmp nil)
-            (foreach v col-sy (setq tmp (cons (mark:round1 v) tmp)))
-            (setq col-sy (reverse tmp)
-                  iy     0)
+            (setq iy 0)
             (while (< iy (1- (length col-sy)))
               (setq y0 (nth iy col-sy)
                     y1 (nth (1+ iy) col-sy))
@@ -4982,21 +4992,23 @@
   ins)
 
 (defun mark:fill-ask-mode (/ kw mode)
-  ;; Имена как задал пользователь. Буква С или Т берёт первый ключ на эту букву.
-  ;; Однозначно: 1 2 3 4 5, либо полное имя.
-  (initget (strcat "Сетка-мультилинии Точка-мультилинии Сетка-динамика "
-                   "Точка-динамика Полилинии Мультилинии-точка Динамика-точка "
-                   "1 2 3 4 5"))
+  ;; Два ключа на «Точка» или «Сетка» нельзя: AutoCAD берёт первый.
+  ;; Поэтому динамика в списке с цифрой. Команда Точка-динамика — отдельно.
+  (mark:out "Точка-динамика: команда, либо 4, либо Д. Буква Т — Точка-мультилинии.")
+  (initget (strcat "Сетка-мультилинии Точка-мультилинии "
+                   "3-Сетка-динамика 4-Точка-динамика Полилинии "
+                   "Динамика-точка Мультилинии-точка 1 2 5"))
   (setq kw (getkword
-    "\nРежим [Сетка-мультилинии/Точка-мультилинии/Сетка-динамика/Точка-динамика/Полилинии] <Сетка-мультилинии>: "))
+    "\nРежим [Сетка-мультилинии/Точка-мультилинии/3-Сетка-динамика/4-Точка-динамика/Полилинии] <Сетка-мультилинии>: "))
   (cond
     ((or (null kw) (= kw "Сетка-мультилинии") (= kw "1"))
      (setq mode "3"))
     ((or (= kw "Точка-мультилинии") (= kw "Мультилинии-точка") (= kw "2"))
      (setq mode "2"))
-    ((or (= kw "Сетка-динамика") (= kw "3"))
+    ((or (= kw "3-Сетка-динамика") (= kw "3"))
      (setq mode "5"))
-    ((or (= kw "Точка-динамика") (= kw "Динамика-точка") (= kw "4"))
+    ((or (= kw "4-Точка-динамика") (= kw "4")
+         (= kw "Динамика-точка") (= kw "Д"))
      (setq mode "4"))
     ((or (= kw "Полилинии") (= kw "5"))
      (setq mode "1"))
@@ -5011,13 +5023,23 @@
                   (t "Сетка-мультилинии"))))
   mode)
 
-(defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list)
+(defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list forced)
+  (setq forced *mark:fill-force*
+        *mark:fill-force* nil)
   (mark:cmd-line
     "МАРКАБЛОК — вставка «Заполнение в витраж». Список: Сетка-мультилинии, Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии. Марки не пишет.")
   (mark:reset-state)
   (mark:banner)
   (mark:out "МАРКАБЛОК — вставка «Заполнение в витраж» по ячейкам")
-  (setq mode (mark:fill-ask-mode))
+  (setq mode (if forced forced (mark:fill-ask-mode)))
+  (if forced
+    (mark:out
+      (strcat "[INFO] Команда = "
+              (cond ((= mode "2") "Точка-мультилинии")
+                    ((= mode "5") "Сетка-динамика")
+                    ((= mode "4") "Точка-динамика")
+                    ((= mode "1") "Полилинии")
+                    (t "Сетка-мультилинии")))))
   (setq cells nil
         pts   nil
         ins-list nil
@@ -5234,6 +5256,11 @@
 
 (defun c:МАРКАБЛОК () (mark:fill-main))
 (defun c:MARKFILL () (mark:fill-main))
+(defun c:Сетка-мультилинии () (setq *mark:fill-force* "3") (c:МАРКАБЛОК))
+(defun c:Точка-мультилинии () (setq *mark:fill-force* "2") (c:МАРКАБЛОК))
+(defun c:Сетка-динамика () (setq *mark:fill-force* "5") (c:МАРКАБЛОК))
+(defun c:Точка-динамика () (setq *mark:fill-force* "4") (c:МАРКАБЛОК))
+(defun c:Полилинии () (setq *mark:fill-force* "1") (c:МАРКАБЛОК))
 
 ;; Снять старые имена из памяти AutoCAD при повторной загрузке
 (setq c:МАРКИРОВКА nil)
@@ -5294,5 +5321,6 @@
   "\nМАРКАРЯД    — рядовка из блоков «Ряд заполнений»: номера снизу, буквы справа"
   "\nМАРКАТАБЛ   — ведомость"
   "\nМАРКАБЛОК   — Сетка-мультилинии, Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии"
+  "\nТочка-динамика — отдельная команда; в списке: 4 или Д"
   "\nМАРКАТЕСТ   — проверка ячейки на тестовом блоке из линий\n"))
 (princ)
