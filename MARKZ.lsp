@@ -93,6 +93,8 @@
 (setq *mark:fill-tol*    30.0)    ; мм Ч выравнивание осей
 (setq *mark:fill-slope*  0.0033)  ; уклон стойки, не ослабл€ть без чертежа
 (setq *mark:fill-window* 5000.0)  ; мм Ч окно поиска дл€ режима Ђ“очкаї
+(setq *mark:fill-max-w*  3000.0)  ; шире Ч не €чейка, а разрыв между участками
+(setq *mark:fill-max-h*  4500.0)
 
 ;; ¬едомость
 (setq *mtab:allowance* 26)
@@ -102,14 +104,18 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 38")
+(setq *mark:rev*    "–ед. 39")
 
 ;; ћј– ј: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
 (setq *mark:batch-undo* nil)
+(setq *mark:seg-cache* nil)
+(setq *mark:no-expl-undo* nil)
 
 (defun mark:reset-state ()
   (setq *mark:dyn-cache*    nil
+        *mark:seg-cache*    nil
+        *mark:no-expl-undo* nil
         *mark:errors*       0
         *mark:warnings*     0
         *mark:records*      nil
@@ -4949,15 +4955,23 @@
       (setq out (cons it out))))
   out)
 
-(defun mark:fill-owned-axes (hits / i vs hs part s x0 y0 x1 y1 dx dy ln hw)
+(defun mark:fill-owned-axes (hits / i n vs hs part s x0 y0 x1 y1 dx dy ln hw nm)
   (setq i 0
+        n (length hits)
         vs nil
         hs nil
         *mark:line-vis* 0
-        *mark:dyn-quiet* t)
+        *mark:dyn-quiet* t
+        *mark:no-expl-undo* t)
   (foreach hit hits
     (setq i (1+ i)
+          nm (mark:fill-eff-name (cadr hit))
           part (mark:fill-segs-of-ins (cadr hit)))
+    (if (and part nm (not (mark:fill-def-has-mline nm 0)))
+      (setq *mark:line-vis* (1+ *mark:line-vis*)))
+    (if (and (> n 100) (= (rem i 250) 0))
+      (mark:out
+        (strcat "[INFO] „итаю блоки: " (itoa i) " из " (itoa n))))
     (foreach s part
       (setq x0 (min (float (nth 0 s)) (float (nth 2 s)))
             y0 (min (float (nth 1 s)) (float (nth 3 s)))
@@ -4980,7 +4994,8 @@
              (setq vs (cons (list (/ (+ (float (nth 0 s)) (float (nth 2 s))) 2.0)
                                   y0 y1 hw i)
                             vs))))))))
-  (setq *mark:dyn-quiet* nil)
+  (setq *mark:dyn-quiet* nil
+        *mark:no-expl-undo* nil)
   (mark:out
     (strcat "[INFO] ќтрезков каркаса: " (itoa (+ (length vs) (length hs)))
             "  вертикальных " (itoa (length vs))
@@ -5020,7 +5035,9 @@
       (cond
         ((not (mark:fill-owners-differ oL oR))
          (setq n-own (1+ n-own)))
-        ((<= w 50.0) nil)
+        ((or (<= w 50.0)
+             (and (numberp *mark:fill-max-w*) (> w *mark:fill-max-w*)))
+         nil)
         (t
          (setq spanning (mark:fill-span-items hs xL xR gap)
                rows (mark:fill-cluster-items spanning)
@@ -5037,7 +5054,9 @@
                      (mark:fill-owners bot)
                      (mark:fill-owners top)))
               (setq n-own (1+ n-own)))
-             ((<= h 50.0) nil)
+             ((or (<= h 50.0)
+                  (and (numberp *mark:fill-max-h*) (> h *mark:fill-max-h*)))
+              nil)
              ((not (and (mark:fill-covers (mark:fill-item-spans Lcol) yB yT gap)
                         (mark:fill-covers (mark:fill-item-spans Rcol) yB yT gap)))
               (setq n-open (1+ n-open)))
@@ -5240,7 +5259,7 @@
   (if (or (null doc) (null obj))
     nil
     (progn
-      (if (null *mark:pt-undo*)
+      (if (and (null *mark:pt-undo*) (null *mark:no-expl-undo*))
         (mark:ax-invoke-ok doc "StartUndoMark" nil))
       (setq copy (vl-catch-all-apply 'vla-Copy (list obj)))
       (if (or (vl-catch-all-error-p copy) (null copy))
@@ -5252,7 +5271,7 @@
               (vl-catch-all-apply 'vla-Delete (list copy))
               (setq segs nil))
             (setq segs (mark:fill-exploded-segs lst 0)))))
-      (if (null *mark:pt-undo*)
+      (if (and (null *mark:pt-undo*) (null *mark:no-expl-undo*))
         (mark:ax-invoke-ok doc "EndUndoMark" nil))
       segs)))
 
@@ -5285,31 +5304,35 @@
             out)))
   (reverse out))
 
-(defun mark:fill-segs-of-ins (e / ed nm mat segs)
+(defun mark:fill-segs-of-ins (e / pair ed nm mat segs)
   ;; ћультилини€ Ч как раньше, из определени€, с полушириной.
   ;; Ћинии динблока Ч только текуща€ видимость, без отступа 25 мм.
-  (setq ed  (entget e)
-        nm  (if ed (cdr (assoc 2 ed)) nil)
-        mat (if ed (mark:fill-mat-of ed) nil))
-  (if (and nm (mark:fill-def-has-mline nm 0))
-    (setq segs (if mat (mark:fill-def-segs nm mat 0) nil))
+  (setq pair (assoc e *mark:seg-cache*))
+  (if pair
+    (cdr pair)
     (progn
-      (setq segs (mark:fill-lines-hw0 (mark:fill-explode-segs e))
-            *mark:line-vis* (1+ (if (numberp *mark:line-vis*) *mark:line-vis* 0)))
-      (if (or (null segs) (< (length segs) 2))
+      (setq ed  (entget e)
+            nm  (if ed (cdr (assoc 2 ed)) nil)
+            mat (if ed (mark:fill-mat-of ed) nil))
+      (if (and nm (mark:fill-def-has-mline nm 0))
+        (setq segs (if mat (mark:fill-def-segs nm mat 0) nil))
         (progn
-          (setq segs (mark:fill-lines-hw0
-                       (if (and nm mat) (mark:fill-def-segs nm mat 0) nil)))
-          (if (null *mark:dyn-quiet*)
-            (mark:out "[WARN] ¬идимый каркас не прочитан Ч линии из определени€, отступ 0."))))))
-  (if (null *mark:dyn-quiet*)
-    (mark:out
-      (strcat "[INFO] Ѕлок Ђ" (mark:fill-eff-name e)
-              "ї: отрезков " (itoa (length segs))
-              (if (and nm (mark:fill-def-has-mline nm 0))
-                ""
-                ", видимые линии, отступ 0"))))
-  segs)
+          (setq segs (mark:fill-lines-hw0 (mark:fill-explode-segs e)))
+          (if (or (null segs) (< (length segs) 2))
+            (progn
+              (setq segs (mark:fill-lines-hw0
+                           (if (and nm mat) (mark:fill-def-segs nm mat 0) nil)))
+              (if (null *mark:dyn-quiet*)
+                (mark:out "[WARN] ¬идимый каркас не прочитан Ч линии из определени€, отступ 0."))))))
+      (if (null *mark:dyn-quiet*)
+        (mark:out
+          (strcat "[INFO] Ѕлок Ђ" (mark:fill-eff-name e)
+                  "ї: отрезков " (itoa (length segs))
+                  (if (and nm (mark:fill-def-has-mline nm 0))
+                    ""
+                    ", видимые линии, отступ 0"))))
+      (setq *mark:seg-cache* (cons (cons e segs) *mark:seg-cache*))
+      segs)))
 
 (defun mark:fill-try-rays (segs pt cells pts / bb)
   (setq bb (mark:fill-cell-by-rays segs pt))
@@ -5348,30 +5371,62 @@
         (setq r (mark:fill-try-rays segs pt cells pts)))))
   r)
 
-(defun mark:fill-dyn-cell (ptu ptw cells pts / hits r win)
+(defun mark:fill-hit-rank (pt e / bb)
+  ;; ќгромный габарит динблока не должен вытесн€ть соседние стойки.
+  (setq bb (mark:cell-bb e))
+  (if (and bb
+           (or (> (abs (- (nth 2 bb) (nth 0 bb))) 8000.0)
+               (> (abs (- (nth 3 bb) (nth 1 bb))) 8000.0)))
+    (mark:fill-ins-dist pt e)
+    (mark:fill-bb-dist pt e)))
+
+(defun mark:fill-dyn-candidates (pt win / ss i e nm d hits)
+  (mark:out
+    (strcat "[INFO] »щу вставки в пределах " (rtos win 2 0) " ммЕ"))
+  (setq ss (vl-catch-all-apply 'ssget
+             (list "X" (list (cons 0 "INSERT"))))
+        hits nil)
+  (if (and ss (not (vl-catch-all-error-p ss)))
+    (progn
+      (setq i (sslength ss))
+      (repeat i
+        (setq i (1- i)
+              e (ssname ss i)
+              nm (mark:fill-eff-name e))
+        (if (not (mark:fill-skip-block? nm))
+          (progn
+            (setq d (mark:fill-hit-rank pt e))
+            (if (<= d win)
+              (setq hits (cons (list d e) hits))))))))
+  (vl-sort hits '(lambda (a b) (< (car a) (car b)))))
+
+(defun mark:fill-dyn-cell (ptu ptw cells pts / all hits r tried n lim)
   ;; ячейка Ч пустота между вставками, не одна стойка.
-  ;; Ћинии динблока: как —етка-динамика, без отступа 25 мм.
-  (setq win (if (and (numberp *mark:fill-window*) (> *mark:fill-window* 0.0))
-              *mark:fill-window*
-              5000.0)
-        r nil)
-  (if (and *mark:dyn-set* (mark:fill-set-near *mark:dyn-set* ptw win))
+  ;; Ќе 40 ближайших: стороны €чейки из линий часто дальше по габариту.
+  (setq r nil
+        tried 0)
+  (if *mark:dyn-set*
     (progn
-      (setq hits *mark:dyn-set*)
-      (mark:out "[INFO]  аркас прежний."))
-    (setq hits (mark:fill-insert-hits ptu ptw)))
-  (setq r (mark:fill-dyn-from hits ptw cells pts))
-  (if (and (null r) hits)
-    (progn
-      (mark:out "[INFO] ¬ этом окне €чейка не собрана Ч беру блоки дальше.")
-      (setq hits (mark:fill-near-inserts ptw (* win 4.0)))
-      (setq r (mark:fill-dyn-from hits ptw cells pts))))
-  (if (and (null r) (null *mark:dyn-set*))
-    (progn
-      (setq hits (mark:fill-pick-frame))
-      (if hits
-        (setq r (mark:fill-dyn-from hits ptw cells pts))
-        (mark:out "[INFO] Ѕлоки каркаса не выбраны."))))
+      (mark:out "[INFO] ѕробую прежний каркас.")
+      (setq r (mark:fill-dyn-from *mark:dyn-set* ptw cells pts)
+            hits *mark:dyn-set*)))
+  (if (null r)
+    (setq all (mark:fill-dyn-candidates ptw 6000.0)))
+  (if (and (null r) all)
+    (mark:out
+      (strcat "[INFO] Ѕлоков в пределах 6000 мм: " (itoa (length all)))))
+  (foreach lim '(80 180)
+    (if (and (null r) all (> (length all) tried))
+      (progn
+        (setq n (min lim (length all)))
+        (if (> n tried)
+          (progn
+            (setq tried n
+                  hits (mark:fill-hits-take all n))
+            (mark:out
+              (strcat "[INFO] Ѕеру " (itoa n) " ближайших блоков каркаса."))
+            (mark:fill-hit-report hits)
+            (setq r (mark:fill-dyn-from hits ptw cells pts)))))))
   (if r
     (progn
       (setq *mark:dyn-set* hits)
