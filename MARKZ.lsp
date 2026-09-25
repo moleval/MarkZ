@@ -1,8 +1,8 @@
 ;;;=====================================================================
 ;;;  MARKZ.lsp  —  ЗАПОЛНЕНИЕ АТРИБУТОВ МАРКИ ЗАПОЛНЕНИЙ
 ;;;  Файл: D:\MARKZ.lsp
-;;;  Команды AutoCAD: MARKZ / МАРКАЗ, MARKAR / МАРКАР,
-;;;                   MARKTABLE / МАРКАТАБЛ, MARKA / МАРКА
+;;;  Команды: МАРКА, МАРКИРОВКА, МАРКАРЯД, МАРКАТАБЛ, МАРКАБЛОК
+;;;  Старые имена тоже работают: МАРКАЗ, МАРКАР, МАРКАЗАЛ
 ;;;
 ;;;  Режим самодиагностики TEST 00 ... TEST 14.
 ;;;  TEST 00 — прогон скобок исходника MARKZ.lsp.
@@ -20,7 +20,7 @@
 
 (vl-load-com)
 
-;;;--------------------- Конфигурация ---------------------------------
+;;;--------------------- Шапка: имена и допуски (править здесь) ------
 
 ;; Точное имя или маска wcmatch, напр.: "*аполнение*витраж*"
 (setq *mark:block-fill*    "Заполнение в витраж")
@@ -60,10 +60,30 @@
 ;; Сколько строк ошибок показывать в одном тесте (остальное — сводка)
 (setq *mark:max-err-lines* 10)
 
+;; Рядовка
+(setq *mark:ar-block*   "Ряд заполнений")
+(setq *mark:ar-attr*    "Ряд")
+(setq *mark:ar-group-h* "Рядовка горизонтальная")
+(setq *mark:ar-group-v* "Рядовка вертикальная")
+(setq *mark:ar-offset*  1000.0)
+(setq *mark:ar-gap*     1000.0)
+(setq *mark:ar-line*    150.0)   ; шаг линий 1+, мм
+(setq *mark:ar-tol*     1.0)
+
+;; Сетка заполнений
+(setq *mark:fill-tol*    30.0)    ; мм — выравнивание осей
+(setq *mark:fill-slope*  0.0033)  ; уклон стойки, не ослаблять без чертежа
+(setq *mark:fill-window* 5000.0)  ; мм — окно поиска для режима «Точка»
+
+;; Ведомость
+(setq *mtab:allowance* 26)
+(setq *mtab:h-keys* '("Высота в свету" "ВЫСОТА В СВЕТУ" "ВЫСОТА" "Height"))
+(setq *mtab:w-keys* '("Ширина в свету" "ШИРИНА В СВЕТУ" "ШИРИНА" "ДЛИНА" "Width"))
+
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 23")
+(setq *mark:rev*    "Ред. 24")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -805,7 +825,7 @@
     (progn
       (mark:out "[TEST 01] Блоки \"Заполнение в витраж\" — ERROR")
       (mark:out "Блоки заполнений не обнаружены.")
-      (mark:out "[INFO] МАРКАЗ пишет марку только в «Заполнение в витраж».")
+      (mark:out "[INFO] МАРКИРОВКА пишет марку только в «Заполнение в витраж».")
       (mark:out "[INFO] Стойки и линии сетки эта команда не маркирует.")
       (mark:out "[INFO] Сетка без заполнений — команда МАРКА, источник Сетка.")
       (mark:out "[INFO] Имена, найденные в выделении:")
@@ -1818,7 +1838,7 @@
 
 (defun mark:main (/ r)
   (mark:cmd-line
-    "МАРКАЗ — марка в уже стоящие «Заполнение в витраж». Стойки не выбирать. Сетка без заполнений — МАРКА.")
+    "МАРКИРОВКА — марка в уже стоящие «Заполнение в витраж». Стойки не выбирать. Сетка без заполнений — МАРКА.")
   (mark:reset-state)
   (mark:banner)
 
@@ -1884,9 +1904,7 @@
 ;;;  Размеры: припуск +26 мм (как в ZAPOLNENIE), округление fix().
 ;;;=====================================================================
 
-(setq *mtab:allowance* 26)
-(setq *mtab:h-keys* '("Высота в свету" "ВЫСОТА В СВЕТУ" "ВЫСОТА" "Height"))
-(setq *mtab:w-keys* '("Ширина в свету" "ШИРИНА В СВЕТУ" "ШИРИНА" "ДЛИНА" "Width"))
+;; *mtab:allowance* *mtab:h-keys* *mtab:w-keys* — в шапке
 
 (defun mtab:round2 (x)
   (/ (fix (+ (* x 100.0) 0.5)) 100.0))
@@ -2616,13 +2634,7 @@
 ;;;  Разная W в столбце > этаж ниже; разная H в ряду > этаж правее.
 ;;;=====================================================================
 
-(setq *mark:ar-block*  "Ряд заполнений")
-(setq *mark:ar-attr*   "Ряд")
-(setq *mark:ar-offset* 1000.0)
-(setq *mark:ar-gap*    1000.0)
-;; шаг между линиями рядовки (2-я и далее): 150, «липнут»
-(setq *mark:ar-line*   150.0)
-(setq *mark:ar-tol*    1.0)
+;; *mark:ar-* — в шапке
 
 (defun mark:ar-banner ()
   (mark:out "========================================")
@@ -2891,7 +2903,7 @@
   (setq doc    (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
         groups (if doc (mark:ax-get doc "Groups") nil))
   (if groups
-    (foreach name '("Рядовка горизонтальная" "Рядовка вертикальная")
+    (foreach name (list *mark:ar-group-h* *mark:ar-group-v*)
       (setq old (mark:ax-invoke groups "Item" name))
       (if old
         (vl-catch-all-apply 'vla-Delete (list old)))))
@@ -3176,7 +3188,7 @@
                      h-ents v-ents he ve
                      h-items v-items pl)
   (mark:cmd-line
-    "МАРКАР — рядовка уже стоящих заполнений: номера снизу (ширина), буквы справа (высота).")
+    "МАРКАРЯД — рядовка уже стоящих заполнений: номера снизу (ширина), буквы справа (высота).")
   (mark:reset-state)
   (mark:ar-banner)
 
@@ -3342,8 +3354,8 @@
                                    cnt-v  (1+ cnt-v)))))))
 
                    ;; группы: горизонталь и вертикаль раздельно
-                   (mark:ar-make-group "Рядовка горизонтальная" h-ents)
-                   (mark:ar-make-group "Рядовка вертикальная" v-ents)
+                   (mark:ar-make-group *mark:ar-group-h* h-ents)
+                   (mark:ar-make-group *mark:ar-group-v* v-ents)
 
                    (if (and doc (not *mark:batch-undo*))
                      (mark:ax-invoke-ok doc "EndUndoMark" nil))
@@ -3366,18 +3378,16 @@
 
 
 ;;;=====================================================================
-;;;  МАРКАЗАЛ / MARKFILL — вставка «Заполнение в витраж» по ячейкам
+;;;  МАРКАБЛОК / MARKFILL — вставка «Заполнение в витраж» по ячейкам
 ;;;  Режимы:
 ;;;    1 Полилинии — выбирать границы ячеек (entsel)
-;;;    2 Точка     — тыкнуть внутрь закрытой ячейки
+;;;    2 Точка     — ячейка за ячейкой, пока не Enter
 ;;;    3 Массив    — линии/полилинии > сетка > внутренние ячейки
 ;;;  Вставка: левый нижний угол, W/H = габарит ячейки.
 ;;;  Атрибуты обнуляются — пользователь заполняет сам.
 ;;;=====================================================================
 
-(setq *mark:fill-tol*    30.0)  ; мм — выравнивание осей сетки
-(setq *mark:fill-slope*  0.0033) ; допуск уклона стойки (<= 10 мм на 3000 мм)
-(setq *mark:fill-window* 5000.0) ; мм — окно поиска сетки для режима «точка»
+;; *mark:fill-tol* *mark:fill-slope* *mark:fill-window* — в шапке
 (setq *mark:mline-warns* 0)          ; счётчик warn MLINE (макс 3)
 
 ;;; ---- габарит сущности > (x0 y0 x1 y1) | nil --------------------------
@@ -3748,11 +3758,11 @@
 
 (defun mark:fill-mode-point (cells pts / pt ss i e verts bb
                                  best best-area a r segs win)
-  (setq pt (getpoint "\nТочка внутри ячейки <Enter — отмена>: "))
+  (setq pt (getpoint "\nТочка внутри ячейки <Enter — конец>: "))
   (if (null pt)
     (progn
-      (mark:out "[INFO] Точка не указана.")
-      (list cells pts))
+      (mark:out "[INFO] Конец режима «Точка».")
+      (list nil nil 'cancel))
     (progn
       (setq ss (vl-catch-all-apply 'ssget
                  (list "X" (list (cons 0 "LWPOLYLINE")))))
@@ -4345,11 +4355,36 @@
                     " (время вставки: " (rtos t_ins 2 2) " с, "
                     "всего: " (rtos (/ (- (getvar "MILLISECS") t0) 1000.0) 2 2) " с)"))
           (reverse lst))))))
+(defun mark:fill-points-loop (/ going r n ins one acc-cells acc-pts)
+  (setq going     t
+        n         0
+        ins       nil
+        acc-cells nil
+        acc-pts   nil)
+  (mark:out "[INFO] Точка: ячейка за ячейкой. Enter — конец.")
+  (while going
+    (setq r (mark:fill-mode-point acc-cells acc-pts))
+    (cond
+      ((or (null r) (eq (caddr r) 'cancel))
+       (setq going nil))
+      ((> (length (car r)) (length acc-cells))
+       (setq one (mark:fill-apply (list (car (car r))) (cadr r))
+             acc-cells (car r)
+             acc-pts   (cadr r))
+       (if one
+         (setq ins (append ins one)
+               n   (length ins))))
+      (t nil)))
+  (mark:out
+    (strcat "[INFO] Режим «Точка» завершён. Вставлено: " (itoa n)))
+  ins)
+
 (defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list)
-  (mark:cmd-line "МАРКАЗАЛ — вставить «Заполнение в витраж» по ячейкам сетки. Марки не пишет.")
+  (mark:cmd-line
+    "МАРКАБЛОК — вставка «Заполнение в витраж». Точка: ячейка за ячейкой, Enter — конец. Марки не пишет.")
   (mark:reset-state)
   (mark:banner)
-  (mark:out "МАРКАЗАЛ — вставка «Заполнение в витраж» по ячейкам")
+  (mark:out "МАРКАБЛОК — вставка «Заполнение в витраж» по ячейкам")
   (initget "Сетка Точка Полилиния S T P 1 2 3")
   (setq kw (getkword "\nРежим [Сетка/Точка/Полилиния] <Сетка>: "))
   (cond
@@ -4362,24 +4397,24 @@
     (t (setq mode "3")))
   (setq cells nil
         pts   nil
+        ins-list nil
         t_geom_start (getvar "MILLISECS"))
   (cond
     ((= mode "2")
-     (setq r     (mark:fill-mode-point cells pts)
-           cells (car r)
-           pts   (cadr r)))
+     (setq ins-list (mark:fill-points-loop)))
     ((= mode "3")
-     (setq r     (mark:fill-mode-grid cells pts)
-           cells (car r)
-           pts   (cadr r)))
+     (setq r        (mark:fill-mode-grid cells pts)
+           cells    (car r)
+           pts      (cadr r)
+           t_geom   (/ (- (getvar "MILLISECS") t_geom_start) 1000.0)
+           ins-list (mark:fill-apply cells pts))
+     (if cells
+       (mark:out (strcat "[ТАЙМИНГ] Расчет геометрии сетки: " (rtos t_geom 2 2) " с"))))
     (t
-     (setq r     (mark:fill-mode-poly cells pts)
-           cells (car r)
-           pts   (cadr r))))
-  (setq t_geom (/ (- (getvar "MILLISECS") t_geom_start) 1000.0))
-  (if cells
-    (mark:out (strcat "[ТАЙМИНГ] Расчет геометрии сетки: " (rtos t_geom 2 2) " с")))
-  (setq ins-list (mark:fill-apply cells pts))
+     (setq r        (mark:fill-mode-poly cells pts)
+           cells    (car r)
+           pts      (cadr r)
+           ins-list (mark:fill-apply cells pts))))
   (mark:out (strcat "Ошибок: " (itoa *mark:errors*)))
   (mark:out (strcat "Предупреждений: " (itoa *mark:warnings*)))
   (setq *mark:fills* ins-list)
@@ -4405,7 +4440,7 @@
   (if (eq mode "grid")
     (progn
       ;; ВАРИАНТ 1: ПО СЕТКЕ (полный цикл: МАРКАЗАЛ -> МАРКАЗ -> МАРКАР -> МАРКАТАБЛ)
-      (mark:out "[ЭТАП 1/4] МАРКАЗАЛ — раскладка заполнений по сетке витража...")
+      (mark:out "[ЭТАП 1/4] МАРКАБЛОК — раскладка заполнений по сетке витража...")
       (setq r (mark:fill-mode-grid nil nil)
             cells (car r)
             pts   (cadr r))
@@ -4419,23 +4454,23 @@
                     *mark:reuse-sel* t
                     *mark:sel-total* (length new-fills))
               ;; МАРКАЗ
-              (mark:out "[ЭТАП 2/4] МАРКАЗ — маркировка заполнений...")
+              (mark:out "[ЭТАП 2/4] МАРКИРОВКА — маркировка заполнений...")
               (mark:main)
               ;; МАРКАР
-              (mark:out "[ЭТАП 3/4] МАРКАР — расстановка рядовки...")
+              (mark:out "[ЭТАП 3/4] МАРКАРЯД — расстановка рядовки...")
               (mark:ar-main)
               ;; МАРКАТАБЛ
               (mark:out "[ЭТАП 4/4] МАРКАТАБЛ — ведомость заполнения...")
               (mtab:main))))))
     (progn
       ;; ВАРИАНТ 2: ИЗ ГОТОВЫХ БЛОКОВ (МАРКАЗ -> МАРКАР -> МАРКАТАБЛ)
-      (mark:out "[ЭТАП 1/3] МАРКАЗ — маркировка готовых блоков...")
+      (mark:out "[ЭТАП 1/3] МАРКИРОВКА — маркировка готовых блоков...")
       (setq *mark:reuse-sel* nil)
       (mark:main)
       (if *mark:fills*
         (progn
           (setq *mark:reuse-sel* t)
-          (mark:out "[ЭТАП 2/3] МАРКАР — расстановка рядовки...")
+          (mark:out "[ЭТАП 2/3] МАРКАРЯД — расстановка рядовки...")
           (mark:ar-main)
           (mark:out "[ЭТАП 3/3] МАРКАТАБЛ — ведомость заполнения...")
           (mtab:main))
@@ -4445,12 +4480,15 @@
   (setq *mark:reuse-sel*  nil
         *mark:batch-undo* nil)
   (princ))
+(defun c:МАРКИРОВКА () (mark:main))
 (defun c:MARKZ () (mark:main))
 (defun c:МАРКАЗ () (mark:main))
+(defun c:МАРКАРЯД () (mark:ar-main))
 (defun c:MARKAR () (mark:ar-main))
 (defun c:МАРКАР () (mark:ar-main))
 (defun c:MARKA () (mark:a-all))
 (defun c:МАРКА () (mark:a-all))
+(defun c:МАРКАБЛОК () (mark:fill-main))
 (defun c:МАРКАЗАЛ () (mark:fill-main))
 (defun c:MARKFILL () (mark:fill-main))
 
@@ -4504,9 +4542,10 @@
 (mark:test-parens)
 (princ (strcat
   "\n[MARKZ] Загружен " *mark:rev*
-  "\nМАРКА      — полный цикл: сетка или готовые заполнения"
-  "\nМАРКАЗ     — марки только в «Заполнение в витраж»"
-  "\nМАРКАР     — рядовка: номера снизу, буквы справа"
-  "\nМАРКАТАБЛ  — ведомость"
-  "\nМАРКАЗАЛ   — только вставка заполнений по сетке\n"))
+  "\nМАРКА       — полный цикл: сетка или готовые заполнения"
+  "\nМАРКИРОВКА  — марки только в «Заполнение в витраж»"
+  "\nМАРКАРЯД    — рядовка: номера снизу, буквы справа"
+  "\nМАРКАТАБЛ   — ведомость"
+  "\nМАРКАБЛОК   — вставка заполнений; Точка — пока не Enter"
+  "\nСтарые имена тоже работают: МАРКАЗ, МАРКАР, МАРКАЗАЛ\n"))
 (princ)
