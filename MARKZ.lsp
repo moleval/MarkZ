@@ -63,7 +63,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 22")
+(setq *mark:rev*    "Ред. 23")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -97,6 +97,11 @@
 
 (defun mark:out (msg)
   (prompt (strcat msg "\n")))
+
+;; Одна строка в командной строке при старте. В пакете МАРКА не повторяем.
+(defun mark:cmd-line (text)
+  (if (not *mark:reuse-sel*)
+    (prompt (strcat "\n" text "\n"))))
 
 (defun mark:note-error ()
   (setq *mark:errors* (1+ *mark:errors*)))
@@ -509,7 +514,7 @@
     (progn
   (mark:out "")
   (prompt
-    "\nВыберите объекты (заполнения и, при необходимости, \"Атрибуты витража\"): ")
+    "\nВыберите блоки «Заполнение в витраж» (стойки не нужны): ")
   (setq ss (vl-catch-all-apply 'ssget nil))
   (cond
     ((vl-catch-all-error-p ss)
@@ -663,23 +668,40 @@
 ;;;--------------------- TEST 00 — прогон скобок исходника ------------
 
 (setq *mark:source-candidates*
-  '("D:/MARKZ.lsp"
+  '("D:/MarkZ/MARKZ.lsp"
+    "D:\\MarkZ\\MARKZ.lsp"
+    "D:/MARKZ.lsp"
     "D:\\MARKZ.lsp"
     "MARKZ.lsp"))
 
 (setq *mark:source-file* nil)
 
-(defun mark:find-source (/ f cand)
-  (setq *mark:source-file* nil)
-  (foreach cand *mark:source-candidates*
-    (if (null *mark:source-file*)
-      (progn
-        (setq f (vl-catch-all-apply 'open (list cand "r")))
-        (if (and (not (vl-catch-all-error-p f)) f)
-          (progn
-            (close f)
-            (setq *mark:source-file* cand))))))
-  *mark:source-file*)
+(defun mark:file-open? (path / f)
+  (and (mark:strp path)
+       (/= path "")
+       (setq f (vl-catch-all-apply 'open (list path "r")))
+       (not (vl-catch-all-error-p f))
+       f
+       (progn (close f) t)))
+
+;; Не привязан к одному диску: findfile (пути поддержки) и явные кандидаты.
+(defun mark:find-source (/ cand found ff)
+  (setq found nil
+        ff    (vl-catch-all-apply 'findfile (list "MARKZ.lsp")))
+  (if (and (not (vl-catch-all-error-p ff)) (mark:file-open? ff))
+    (setq found ff))
+  (if (null found)
+    (foreach cand *mark:source-candidates*
+      (if (null found)
+        (progn
+          (setq ff (vl-catch-all-apply 'findfile (list cand)))
+          (cond
+            ((and (not (vl-catch-all-error-p ff)) (mark:file-open? ff))
+             (setq found ff))
+            ((mark:file-open? cand)
+             (setq found cand)))))))
+  (setq *mark:source-file* found)
+  found)
 
 ;; Сканер: баланс () вне строк и комментариев.
 ;; Возвращает (T "детали OK") или (NIL "детали ошибка")
@@ -752,8 +774,8 @@
     ((null path)
      (progn
        (mark:out "[TEST 00] Прогон скобок — WARNING")
-       (mark:out "Файл исходника не найден (D:/MARKZ.lsp).")
-       (mark:out "[INFO] Проверьте *mark:source-candidates* или положите MARKZ.lsp на D:.")
+       (mark:out "Файл исходника для прогона скобок не найден.")
+       (mark:out "[INFO] Искали findfile MARKZ.lsp, D:/MarkZ/MARKZ.lsp и D:/MARKZ.lsp.")
        (mark:note-warning)))
     (t
      (progn
@@ -783,6 +805,9 @@
     (progn
       (mark:out "[TEST 01] Блоки \"Заполнение в витраж\" — ERROR")
       (mark:out "Блоки заполнений не обнаружены.")
+      (mark:out "[INFO] МАРКАЗ пишет марку только в «Заполнение в витраж».")
+      (mark:out "[INFO] Стойки и линии сетки эта команда не маркирует.")
+      (mark:out "[INFO] Сетка без заполнений — команда МАРКА, источник Сетка.")
       (mark:out "[INFO] Имена, найденные в выделении:")
       (if *mark:found-names*
         (foreach nm *mark:found-names*
@@ -1792,6 +1817,8 @@
 ;;;--------------------- Главная процедура -----------------------------
 
 (defun mark:main (/ r)
+  (mark:cmd-line
+    "МАРКАЗ — марка в уже стоящие «Заполнение в витраж». Стойки не выбирать. Сетка без заполнений — МАРКА.")
   (mark:reset-state)
   (mark:banner)
 
@@ -1894,7 +1921,7 @@
       t)
     (progn
   (mark:out "")
-  (prompt "\nВыберите заполнения (и при необходимости \"Атрибуты витража\"): ")
+  (prompt "\nВыберите блоки «Заполнение в витраж» для ведомости: ")
   (setq ss (vl-catch-all-apply 'ssget nil))
   (cond
     ((vl-catch-all-error-p ss)
@@ -2536,6 +2563,7 @@
 
 ;; ---------- Основная ----------
 (defun mtab:main (/ data base do-table do-xls xls-ok)
+  (mark:cmd-line "МАРКАТАБЛ — ведомость по блокам «Заполнение в витраж».")
   (mark:banner)
   (if (null (mtab:select))
     (princ)
@@ -3147,6 +3175,8 @@
                      cnt-h cnt-v y0 x1
                      h-ents v-ents he ve
                      h-items v-items pl)
+  (mark:cmd-line
+    "МАРКАР — рядовка уже стоящих заполнений: номера снизу (ширина), буквы справа (высота).")
   (mark:reset-state)
   (mark:ar-banner)
 
@@ -4217,7 +4247,7 @@
       (reverse out))))
 
 (defun mark:fill-mode-grid (cells pts / ss i e r segs total bb typ ed)
-  (mark:out "Выберите массив линий/мультилиний (сетка витража).")
+  (mark:out "Выберите линии сетки (MLINE/LINE/ARC). Блоки стоек не нужны.")
   (setq ss (vl-catch-all-apply 'ssget (list (list (cons 0 "MLINE,LINE,ARC")))))
   (if (or (vl-catch-all-error-p ss) (null ss))
     (progn
@@ -4316,6 +4346,7 @@
                     "всего: " (rtos (/ (- (getvar "MILLISECS") t0) 1000.0) 2 2) " с)"))
           (reverse lst))))))
 (defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list)
+  (mark:cmd-line "МАРКАЗАЛ — вставить «Заполнение в витраж» по ячейкам сетки. Марки не пишет.")
   (mark:reset-state)
   (mark:banner)
   (mark:out "МАРКАЗАЛ — вставка «Заполнение в витраж» по ячейкам")
@@ -4354,6 +4385,8 @@
   (setq *mark:fills* ins-list)
   (princ))
 (defun mark:a-all (/ kw mode doc r cells pts new-fills)
+  (mark:cmd-line
+    "МАРКА — полный цикл. Сетка: вставка, марки, рядовка, ведомость. Заполнения: без вставки.")
   (mark:reset-state)
   (mark:out "========================================")
   (mark:out (strcat " МАРКА — универсальный пакет  " *mark:rev*))
@@ -4383,7 +4416,8 @@
           (if new-fills
             (progn
               (setq *mark:fills* new-fills
-                    *mark:reuse-sel* t)
+                    *mark:reuse-sel* t
+                    *mark:sel-total* (length new-fills))
               ;; МАРКАЗ
               (mark:out "[ЭТАП 2/4] МАРКАЗ — маркировка заполнений...")
               (mark:main)
@@ -4423,6 +4457,19 @@
 ;; Принудительно очищаем старую команду c:МАРКАЗАЛА в памяти AutoCAD
 (setq c:МАРКАЗАЛА nil)
 
+(defun mark:snapshot-path (/ src dir ch)
+  (setq src (mark:find-source)
+        dir (if src (vl-filename-directory src) nil))
+  (if (or (null dir) (= dir ""))
+    (setq dir (getvar "DWGPREFIX")))
+  (if (and (mark:strp dir) (/= dir ""))
+    (progn
+      (setq ch (substr dir (strlen dir) 1))
+      (if (and (/= ch "/") (/= ch "\\"))
+        (setq dir (strcat dir "/"))))
+    (setq dir ""))
+  (strcat dir "MARKZ_SNAPSHOT.txt"))
+
 (defun c:SNAPSHOT (/ ss i e bb lst fn f ed typ p0 p1 rad w h)
   (prompt "\nВыберите элементы для снятия геометрии (SNAPSHOT): ")
   (setq ss (ssget))
@@ -4440,7 +4487,7 @@
         (setq lst (cons (list typ
                               (if bb (mapcar 'mark:round1 bb) nil))
                         lst)))
-      (setq fn "D:/MARKZ_SNAPSHOT.txt"
+      (setq fn (mark:snapshot-path)
             f  (open fn "w"))
       (if f
         (progn
@@ -4449,11 +4496,17 @@
             (write-line (vl-prin1-to-string item) f))
           (close f)
           (prompt (strcat "\n[OK] Снапшот геометрии сохранен в " fn "\n")))
-        (prompt "\n[ERROR] Не удалось открыть файл D:/MARKZ_SNAPSHOT.txt\n"))))
+        (prompt (strcat "\n[ERROR] Не удалось открыть файл " fn "\n")))))
   (princ))
 
 ;;; ---- TEST 00 + сообщение загрузки ------------------------------------
 
 (mark:test-parens)
-(princ (strcat "\n[MARKZ] Загружен " *mark:rev* "\n"))
+(princ (strcat
+  "\n[MARKZ] Загружен " *mark:rev*
+  "\nМАРКА      — полный цикл: сетка или готовые заполнения"
+  "\nМАРКАЗ     — марки только в «Заполнение в витраж»"
+  "\nМАРКАР     — рядовка: номера снизу, буквы справа"
+  "\nМАРКАТАБЛ  — ведомость"
+  "\nМАРКАЗАЛ   — только вставка заполнений по сетке\n"))
 (princ)
