@@ -104,13 +104,17 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 39")
+(setq *mark:rev*    "Ред. 40")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
 (setq *mark:batch-undo* nil)
 (setq *mark:seg-cache* nil)
+(setq *mark:udef-cache* nil)
+(setq *mark:mline-cache* nil)
 (setq *mark:no-expl-undo* nil)
+(setq *mark:expl-n* 0)
+(setq *mark:def-n* 0)
 
 (defun mark:reset-state ()
   (setq *mark:dyn-cache*    nil
@@ -4955,19 +4959,22 @@
       (setq out (cons it out))))
   out)
 
-(defun mark:fill-owned-axes (hits / i n vs hs part s x0 y0 x1 y1 dx dy ln hw nm)
+(defun mark:fill-owned-axes (hits / i n vs hs part s x0 y0 x1 y1 dx dy ln hw nm ed)
   (setq i 0
         n (length hits)
         vs nil
         hs nil
         *mark:line-vis* 0
+        *mark:expl-n* 0
+        *mark:def-n* 0
         *mark:dyn-quiet* t
         *mark:no-expl-undo* t)
   (foreach hit hits
     (setq i (1+ i)
-          nm (mark:fill-eff-name (cadr hit))
+          ed (entget (cadr hit))
+          nm (if ed (cdr (assoc 2 ed)) nil)
           part (mark:fill-segs-of-ins (cadr hit)))
-    (if (and part nm (not (mark:fill-def-has-mline nm 0)))
+    (if (and part (not (mark:fill-mline-p nm)))
       (setq *mark:line-vis* (1+ *mark:line-vis*)))
     (if (and (> n 100) (= (rem i 250) 0))
       (mark:out
@@ -4996,6 +5003,13 @@
                             vs))))))))
   (setq *mark:dyn-quiet* nil
         *mark:no-expl-undo* nil)
+  (if (or (and (numberp *mark:expl-n*) (> *mark:expl-n* 0))
+          (and (numberp *mark:def-n*) (> *mark:def-n* 0)))
+    (mark:out
+      (strcat "[INFO] Геометрия: из определения "
+              (itoa (if (numberp *mark:def-n*) *mark:def-n* 0))
+              ", разборка "
+              (itoa (if (numberp *mark:expl-n*) *mark:expl-n* 0)))))
   (mark:out
     (strcat "[INFO] Отрезков каркаса: " (itoa (+ (length vs) (length hs)))
             "  вертикальных " (itoa (length vs))
@@ -5015,6 +5029,7 @@
   (setq axes (mark:fill-owned-axes hits)
         vs (car axes)
         hs (cadr axes)
+        *mark:h-bins* (mark:fill-index-hs hs)
         cols (mark:fill-cluster-items vs)
         gap (+ *mark:fill-tol* 25.0)
         boxes nil
@@ -5037,9 +5052,13 @@
          (setq n-own (1+ n-own)))
         ((or (<= w 50.0)
              (and (numberp *mark:fill-max-w*) (> w *mark:fill-max-w*)))
+         (if (and (numberp *mark:fill-max-w*) (> w *mark:fill-max-w*))
+           (setq iR nL))
          nil)
         (t
-         (setq spanning (mark:fill-span-items hs xL xR gap)
+         (setq spanning (mark:fill-span-items
+                          (mark:fill-hs-near *mark:h-bins* xL xR gap)
+                          xL xR gap)
                rows (mark:fill-cluster-items spanning)
                iB 0
                nB (length rows))
@@ -5314,16 +5333,20 @@
       (setq ed  (entget e)
             nm  (if ed (cdr (assoc 2 ed)) nil)
             mat (if ed (mark:fill-mat-of ed) nil))
-      (if (and nm (mark:fill-def-has-mline nm 0))
+      (if (mark:fill-mline-p nm)
         (setq segs (if mat (mark:fill-def-segs nm mat 0) nil))
         (progn
-          (setq segs (mark:fill-lines-hw0 (mark:fill-explode-segs e)))
+          (if (and nm mat (= "*" (substr nm 1 1)))
+            (setq segs (mark:fill-segs-xform (mark:fill-bname-local nm) mat)))
           (if (or (null segs) (< (length segs) 2))
             (progn
-              (setq segs (mark:fill-lines-hw0
-                           (if (and nm mat) (mark:fill-def-segs nm mat 0) nil)))
-              (if (null *mark:dyn-quiet*)
-                (mark:out "[WARN] Видимый каркас не прочитан — линии из определения, отступ 0."))))))
+              (setq segs (mark:fill-lines-hw0 (mark:fill-explode-segs e))
+                    *mark:expl-n* (1+ (if (numberp *mark:expl-n*) *mark:expl-n* 0)))
+              (if (and (or (null segs) (< (length segs) 2)) nm mat)
+                (setq segs (mark:fill-lines-hw0 (mark:fill-def-segs nm mat 0)))))
+            (setq *mark:def-n* (1+ (if (numberp *mark:def-n*) *mark:def-n* 0))))
+          (if (and (null *mark:dyn-quiet*) (or (null segs) (< (length segs) 2)))
+            (mark:out "[WARN] Видимый каркас не прочитан — линии из определения, отступ 0."))))
       (if (null *mark:dyn-quiet*)
         (mark:out
           (strcat "[INFO] Блок «" (mark:fill-eff-name e)
@@ -5371,6 +5394,84 @@
         (setq r (mark:fill-try-rays segs pt cells pts)))))
   r)
 
+(defun mark:fill-mline-p (bname / pair hit)
+  (if (or (null bname) (= bname ""))
+    nil
+    (progn
+      (setq pair (assoc bname *mark:mline-cache*))
+      (if pair
+        (eq (cdr pair) 'yes)
+        (progn
+          (setq hit (mark:fill-def-has-mline bname 0))
+          (setq *mark:mline-cache*
+            (cons (cons bname (if hit 'yes 'no)) *mark:mline-cache*))
+          hit)))))
+
+(defun mark:fill-bname-local (bname / pair segs)
+  (setq pair (assoc bname *mark:udef-cache*))
+  (if pair
+    (cdr pair)
+    (progn
+      (setq segs (mark:fill-lines-hw0
+                   (mark:fill-def-segs bname (list 1.0 0.0 0.0 0.0 1.0 0.0) 0)))
+      (setq *mark:udef-cache* (cons (cons bname segs) *mark:udef-cache*))
+      segs)))
+
+(defun mark:fill-bin (x)
+  (fix (/ x 2000.0)))
+
+(defun mark:fill-index-hs (hs / acc it k0 k1 k bins item pk p)
+  (setq acc nil)
+  (foreach it hs
+    (setq k0 (mark:fill-bin (nth 1 it))
+          k1 (mark:fill-bin (nth 2 it))
+          k k0)
+    (if (> k k1)
+      (setq pk k k k1 k1 pk))
+    (while (<= k k1)
+      (setq acc (cons (cons k it) acc)
+            k (1+ k))))
+  (if (null acc)
+    nil
+    (progn
+      (setq acc (vl-sort acc '(lambda (a b) (< (car a) (car b))))
+            bins nil
+            item nil
+            k nil)
+      (foreach p acc
+        (if (and k (= (car p) k))
+          (setq item (cons (cdr p) item))
+          (progn
+            (if k (setq bins (cons (cons k item) bins)))
+            (setq k (car p)
+                  item (list (cdr p))))))
+      (if k (setq bins (cons (cons k item) bins)))
+      bins)))
+
+(defun mark:fill-hs-near (bins xL xR gap / k0 k1 k b out)
+  (if (null bins)
+    nil
+    (progn
+      (setq k0 (mark:fill-bin (- xL gap))
+            k1 (mark:fill-bin (+ xR gap))
+            k k0
+            out nil)
+      (while (<= k k1)
+        (setq b (assoc k bins))
+        (if b (setq out (append (cdr b) out)))
+        (setq k (1+ k)))
+      out)))
+
+(defun mark:fill-hits-merge (a b / out e seen)
+  (setq out nil
+        seen nil)
+  (foreach h (append a b)
+    (setq e (cadr h))
+    (if (not (member e seen))
+      (setq seen (cons e seen)
+            out (cons h out))))
+  (reverse out))
+
 (defun mark:fill-hit-rank (pt e / bb)
   ;; Огромный габарит динблока не должен вытеснять соседние стойки.
   (setq bb (mark:cell-bb e))
@@ -5400,33 +5501,53 @@
               (setq hits (cons (list d e) hits))))))))
   (vl-sort hits '(lambda (a b) (< (car a) (car b)))))
 
-(defun mark:fill-dyn-cell (ptu ptw cells pts / all hits r tried n lim)
+(defun mark:fill-bb-area (e / bb)
+  (setq bb (mark:cell-bb e))
+  (if bb
+    (* (abs (- (nth 2 bb) (nth 0 bb)))
+       (abs (- (nth 3 bb) (nth 1 bb))))
+    1.0e12))
+
+(defun mark:fill-dyn-pick (hits / near far e)
+  ;; Все в окне, не 40 ближайших. Далёкий габарит не вытесняет стойку.
+  (setq near nil
+        far nil)
+  (foreach h hits
+    (cond
+      ((<= (car h) 600.0)
+       (setq near (cons h near)))
+      ((and (<= (car h) 2500.0) (< (mark:fill-bb-area (cadr h)) 8.0e6))
+       (setq far (cons h far)))))
+  (setq far (vl-sort far '(lambda (a b) (< (car a) (car b)))))
+  (setq far (mark:fill-hits-take far 220))
+  (mark:fill-hits-merge near far))
+
+(defun mark:fill-dyn-cell (ptu ptw cells pts / all hits r)
   ;; Ячейка — пустота между вставками, не одна стойка.
-  ;; Не 40 ближайших: стороны ячейки из линий часто дальше по габариту.
-  (setq r nil
-        tried 0)
+  (setq r nil)
   (if *mark:dyn-set*
     (progn
       (mark:out "[INFO] Пробую прежний каркас.")
       (setq r (mark:fill-dyn-from *mark:dyn-set* ptw cells pts)
             hits *mark:dyn-set*)))
   (if (null r)
-    (setq all (mark:fill-dyn-candidates ptw 6000.0)))
-  (if (and (null r) all)
-    (mark:out
-      (strcat "[INFO] Блоков в пределах 6000 мм: " (itoa (length all)))))
-  (foreach lim '(80 180)
-    (if (and (null r) all (> (length all) tried))
-      (progn
-        (setq n (min lim (length all)))
-        (if (> n tried)
-          (progn
-            (setq tried n
-                  hits (mark:fill-hits-take all n))
-            (mark:out
-              (strcat "[INFO] Беру " (itoa n) " ближайших блоков каркаса."))
-            (mark:fill-hit-report hits)
-            (setq r (mark:fill-dyn-from hits ptw cells pts)))))))
+    (progn
+      (setq all (mark:fill-dyn-candidates ptw 2500.0)
+            hits (mark:fill-dyn-pick all))
+      (mark:out
+        (strcat "[INFO] В пределах 2500 мм: " (itoa (length all))
+                ", беру " (itoa (length hits))))
+      (mark:fill-hit-report hits)
+      (setq r (mark:fill-dyn-from hits ptw cells pts))))
+  (if (and (null r) (< (length hits) 40))
+    (progn
+      (setq all (mark:fill-dyn-candidates ptw 5000.0)
+            hits (mark:fill-dyn-pick all))
+      (mark:out
+        (strcat "[INFO] В пределах 5000 мм: " (itoa (length all))
+                ", беру " (itoa (length hits))))
+      (mark:fill-hit-report hits)
+      (setq r (mark:fill-dyn-from hits ptw cells pts))))
   (if r
     (progn
       (setq *mark:dyn-set* hits)
