@@ -63,8 +63,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:build*  "2026-09-24.b20")
-(setq *mark:rev*    "r20")
+(setq *mark:rev*    "Ред. 22")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -108,7 +107,7 @@
 (defun mark:banner ()
   (mark:out "========================================")
   (mark:out (strcat " ЗАПОЛНЕНИЕ АТРИБУТОВ МАРКИ  "
-                    *mark:rev* "  build " *mark:build*))
+                    *mark:rev*))
   (mark:out "========================================"))
 
 ;;;--------------------- Утилиты --------------------------------------
@@ -1036,34 +1035,34 @@
        (mark:out "Нет корректных значений ширины/высоты.")
        (mark:note-error))))
 
-  ;; TEST 10 — буквенное кодирование ширин (? 31)
+  ;; TEST 10 — буквы по высотам (не больше 31)
   (mark:out "")
   (cond
-    ((<= (length wlist) (length *mark:letters*))
+    ((<= (length hlist) (length *mark:letters*))
      (progn
        (mark:out "[TEST 10] Буквенная маркировка — OK")
-       (mark:out (strcat "Уникальных ширин: " (itoa (length wlist))))
+       (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))
        (mark:out
          (strcat "Доступно букв: " (itoa (length *mark:letters*))))))
     (t
      (progn
        (mark:out "[TEST 10] Буквенная маркировка — ERROR")
-       (mark:out (strcat "Уникальных ширин: " (itoa (length wlist))))
+       (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))
        (mark:out (strcat "Доступно букв: " (itoa (length *mark:letters*))))
        (mark:out "[ERROR] Маркировка остановлена: недостаточно букв.")
        (mark:note-error))))
 
-  ;; TEST 11 — нумерация высот
+  ;; TEST 11 — номера по ширинам
   (mark:out "")
   (cond
-    ((> (length hlist) 0)
+    ((> (length wlist) 0)
      (progn
-       (mark:out "[TEST 11] Нумерация высот — OK")
-       (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))))
+       (mark:out "[TEST 11] Нумерация ширин — OK")
+       (mark:out (strcat "Уникальных ширин: " (itoa (length wlist))))))
     (t
      (progn
-       (mark:out "[TEST 11] Нумерация высот — ERROR")
-       (mark:out "Уникальных высот: 0")
+       (mark:out "[TEST 11] Нумерация ширин — ERROR")
+       (mark:out "Уникальных ширин: 0")
        (mark:note-error)))))
 
 ;;;--------------------- TEST 12 — специальные Visibility --------------
@@ -1125,8 +1124,9 @@
           h      (mark:rec-get r 'height)
           iw     (if w (mark:index-of *mark:widths* w) nil)
           ih     (if h (mark:index-of *mark:heights* h) nil)
-          letter (if iw (nth iw *mark:letters*) nil)
-          hnum   (if ih (1+ ih) nil)
+          ;; буква — вертикальная рядовка (высота), номер — горизонтальная (ширина)
+          letter (if ih (nth ih *mark:letters*) nil)
+          hnum   (if iw (1+ iw) nil)
           suffix (mark:get-special-suffix (mark:rec-get r 'vis))
           m      (if (and letter hnum)
                    (mark:compose *mark:prefix* letter hnum suffix)
@@ -1675,7 +1675,7 @@
       (mark:out "[TEST 08] Атрибут \"Марка\" — SKIPPED (нет блоков заполнений)")
       (mark:out "[TEST 09] Уникальные размеры — SKIPPED (нет блоков заполнений)")
       (mark:out "[TEST 10] Буквенная маркировка — SKIPPED (нет блоков заполнений)")
-      (mark:out "[TEST 11] Нумерация высот — SKIPPED (нет блоков заполнений)")
+      (mark:out "[TEST 11] Нумерация ширин — SKIPPED (нет блоков заполнений)")
       (mark:out "[TEST 12] Специальные состояния — SKIPPED (нет блоков заполнений)"))))
 
 ;;;--------------------- Этап B — запись атрибутов ---------------------
@@ -1758,7 +1758,7 @@
 (defun mark:report (success)
   (mark:out "")
   (mark:out "========================================")
-  (mark:out (strcat " ИТОГ  " *mark:rev* "  build " *mark:build*))
+  (mark:out (strcat " ИТОГ  " *mark:rev*))
   (mark:out "========================================")
   (mark:out (mark:pad-line "Выбрано объектов:" (itoa *mark:sel-total*)))
   (mark:out
@@ -2581,10 +2581,10 @@
 ;;;=====================================================================
 ;;;  MARKAR — рядовка условных обозначений (Ряд заполнений)
 ;;;  Команды: MARKAR / МАРКАР
-;;;  После МАРКАЗ: парсим «Марку» заполнения > буква + номер
-;;;  > вставляем «Ряд заполнений» с атрибутом «Ряд».
-;;;  Горизонталь: буквы А,Б,В… снизу на min(y0)-1000, соосно по X.
-;;;  Вертикаль: номера 1,2,3… (снизу вверх) справа на max(x1)+1000.
+;;;  После МАРКАЗ: индекс от размера (буква = высота, номер = ширина).
+;;;  Старые «Ряд заполнений» этой зоны удаляются и ставятся заново.
+;;;  Горизонталь: номера 1,2,3… снизу на min(y0)-1000, соосно по X.
+;;;  Вертикаль: буквы А,Б,В… справа на max(x1)+1000.
 ;;;  Разная W в столбце > этаж ниже; разная H в ряду > этаж правее.
 ;;;=====================================================================
 
@@ -2599,7 +2599,7 @@
 (defun mark:ar-banner ()
   (mark:out "========================================")
   (mark:out (strcat " РЯДОВКА УСЛОВНЫХ ОБОЗНАЧЕНИЙ  "
-                    *mark:rev* "  build " *mark:build*))
+                    *mark:rev*))
   (mark:out "========================================"))
 
 ;;;--- Разбор Марки: [Витраж] + " " + БУКВА + НОМЕР + [суффикс] ---------
@@ -2724,7 +2724,7 @@
   ;; 2) один знаменатель: индекс ТОЛЬКО от W/H — как МАРКАЗ
   (mark:ar-reindex out))
 
-;; Переназначение letter/number из уникальных ширин/высот
+;; Переназначение: буква = индекс высоты, номер = индекс ширины + 1
 ;; rec = (letter num e cx cy x0 x1 y0 y1 w h)
 (defun mark:ar-reindex (recs / ws hs ws1 hs1 r w h iw ih letter num out)
   (setq ws1 nil
@@ -2748,10 +2748,13 @@
           ih    (mark:index-of hs h)
           letter (nth 0 r)
           num    (nth 1 r))
-    (if (and iw (< iw (length *mark:letters*)))
-      (setq letter (strcase (nth iw *mark:letters*))))
-    (if ih
-      (setq num (itoa (1+ ih))))
+    ;; не оставлять букву/номер из старой Марки: индекс только от размера
+    (setq letter ""
+          num    "")
+    (if (and ih (< ih (length *mark:letters*)))
+      (setq letter (strcase (nth ih *mark:letters*))))
+    (if iw
+      (setq num (itoa (1+ iw))))
     (setq out
       (cons (list letter num
                   (nth 2 r) (nth 3 r) (nth 4 r)
@@ -2839,6 +2842,70 @@
                  *mark:ar-tol*))
       (setq p e)))
   p)
+
+;;;--- Снять старую рядовку в зоне этой раскладки ----------------------
+;; Группу удаляем отдельно: vla-Delete группы не удаляет вставки.
+;; Полоса снизу и полоса справа — те же места, куда МАРКАР ставит ряды.
+(defun mark:ar-erase-old (recs / ss i e n obj p x y
+                              x0 y0 x1 y1 r victims
+                              xmin xmax ymin ymax
+                              yb xb margin doc groups old name)
+  (setq xmin nil xmax nil ymin nil ymax nil n 0 victims nil)
+  (foreach r recs
+    (setq x0 (nth 5 r)
+          y0 (nth 7 r)
+          x1 (nth 6 r)
+          y1 (nth 8 r))
+    (if (or (null xmin) (< x0 xmin)) (setq xmin x0))
+    (if (or (null xmax) (> x1 xmax)) (setq xmax x1))
+    (if (or (null ymin) (< y0 ymin)) (setq ymin y0))
+    (if (or (null ymax) (> y1 ymax)) (setq ymax y1)))
+  (setq doc    (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
+        groups (if doc (mark:ax-get doc "Groups") nil))
+  (if groups
+    (foreach name '("Рядовка горизонтальная" "Рядовка вертикальная")
+      (setq old (mark:ax-invoke groups "Item" name))
+      (if old
+        (vl-catch-all-apply 'vla-Delete (list old)))))
+  (if (and xmin xmax ymin ymax)
+    (progn
+      (setq margin 500.0
+            yb     (- ymin *mark:ar-offset*)
+            xb     (+ xmax *mark:ar-offset*)
+            ss     (vl-catch-all-apply 'ssget
+                     (list "X" (list (cons 0 "INSERT")))))
+      (if (and ss (not (vl-catch-all-error-p ss)))
+        (progn
+          (setq i (sslength ss))
+          (repeat i
+            (setq i (1- i)
+                  e (ssname ss i))
+            (if (mark:blk-match? e *mark:ar-block*)
+              (setq victims (cons e victims))))
+          (foreach e victims
+            (setq p (cdr (assoc 10 (entget e))))
+            (if p
+              (progn
+                (setq x (float (car p))
+                      y (float (cadr p)))
+                (if (or (and (<= y yb)
+                             (>= y (- yb (* 40.0 *mark:ar-line*)))
+                             (>= x (- xmin margin))
+                             (<= x (+ xmax margin)))
+                        (and (>= x xb)
+                             (<= x (+ xb (* 40.0 *mark:ar-line*)))
+                             (>= y (- ymin margin))
+                             (<= y (+ ymax margin))))
+                  (progn
+                    (setq obj (mark:vla e))
+                    (if obj
+                      (vl-catch-all-apply 'vla-Delete (list obj))
+                      (vl-catch-all-apply 'entdel (list e)))
+                    (setq n (1+ n)))))))))))
+  (if (> n 0)
+    (mark:out
+      (strcat "[INFO] Удалена старая рядовка: " (itoa n) " блок(ов).")))
+  n)
 
 (defun mark:ar-placed-pts (/ ss i e lst p)
   (setq lst nil)
@@ -3108,10 +3175,11 @@
                  (strcat "[INFO] Пригодных заполнений: "
                          (itoa (length recs))))
                (mark:out
-                 (strcat "[INFO] Индексы рядовки от размера: ширин "
+                 (strcat "[INFO] Индексы рядовки: номер=ширина ("
                          (itoa (length *mark:widths*))
-                         ", высот " (itoa (length *mark:heights*))
-                         " (как МАРКАЗ)."))
+                         "), буква=высота ("
+                         (itoa (length *mark:heights*))
+                         ")."))
 
                ;; ключи dynamic-свойств ряда: сначала как у заполнения,
                ;; затем универсальные
@@ -3137,8 +3205,11 @@
                  (progn
                    (if (and doc (not *mark:batch-undo*))
                      (mark:ax-invoke-ok doc "StartUndoMark" nil))
+                   ;; старые буквы/номера на тех же точках иначе пропускает ar-exists
+                   (mark:ar-erase-old recs)
+                   (setq placed (mark:ar-placed-pts))
 
-                   ;; ===== ГОРИЗОНТАЛЬ (буквы) =====
+                   ;; ===== ГОРИЗОНТАЛЬ (номера по ширине) =====
                    (setq y-base nil)
                    (foreach r recs
                      (setq y0 (nth 7 r))
@@ -3149,29 +3220,29 @@
                      (strcat "[INFO] Горизонтальный ряд Y = "
                              (rtos y-base 2 1)))
 
-                   ;; кандидаты: (cx W БУКВА) — столбцы по cx, подгруппы W
+                   ;; кандидаты: (cx W НОМЕР) — столбцы по cx, подгруппы W
                    (setq cols (mark:ar-group-idx recs 3 *mark:ar-tol*)
                          h-items nil)
                    (foreach g cols
                      (setq subs (mark:ar-subgroup g 9 *mark:ar-tol*))
                      (foreach s0 subs
-                       ;; буква — от заполнения ЭТОЙ подгруппы (своя ширина),
+                       ;; номер — от заполнения ЭТОЙ подгруппы (своя ширина),
                        ;; не от первого в колонке
                        (setq ref    (car s0)
-                             letter (strcase (nth 0 ref)))
+                             number (nth 1 ref))
                        (setq h-items
-                         (cons (list (nth 3 ref) (nth 9 ref) letter)
+                         (cons (list (nth 3 ref) (nth 9 ref) number)
                                h-items))))
                    ;; упаковка: max W > ряд 0; наложения > ряд 1+ (по убыв.)
                    (foreach pl (mark:ar-pack h-items)
                      (setq k     (nth 0 pl)
                            x     (nth 1 pl)
                            w     (nth 2 pl)
-                           letter (nth 3 pl)
+                           number (nth 3 pl)
                            y     (- y-base (* k *mark:ar-line*)))
                      (if (not (mark:ar-exists x y placed))
                        (progn
-                         (setq obj (mark:ar-insert space x y letter 270.0))
+                         (setq obj (mark:ar-insert space x y number 270.0))
                          (if obj
                            (progn
                              (setq he    (mark:ar-vla->ename obj)
@@ -3188,7 +3259,7 @@
                              (setq placed (cons (list x y) placed)
                                    cnt-h  (1+ cnt-h)))))))
 
-                   ;; ===== ВЕРТИКАЛЬ (номера), справа =====
+                   ;; ===== ВЕРТИКАЛЬ (буквы по высоте), справа =====
                    (setq x-base nil)
                    (foreach r recs
                      (setq x1 (nth 6 r))
@@ -3199,29 +3270,31 @@
                      (strcat "[INFO] Вертикальный ряд X = "
                              (rtos x-base 2 1)))
 
-                   ;; кандидаты: (cy H НОМЕР) — строки по cy, подгруппы H
+                   ;; кандидаты: (cy H БУКВА) — строки по cy, подгруппы H
                    (setq rows   (mark:ar-group-idx recs 4 *mark:ar-tol*)
                          v-items nil)
                    (foreach g rows
                      (setq subs (mark:ar-subgroup g 10 *mark:ar-tol*))
                      (foreach s0 subs
-                       ;; номер — от заполнения ЭТОЙ подгруппы (своя высота),
+                       ;; буква — от заполнения ЭТОЙ подгруппы (своя высота),
                        ;; не от первого в строке
                        (setq ref    (car s0)
-                             number (nth 1 ref))
+                             letter (if (mark:strp (nth 0 ref))
+                                      (strcase (nth 0 ref))
+                                      ""))
                        (setq v-items
-                         (cons (list (nth 4 ref) (nth 10 ref) number)
+                         (cons (list (nth 4 ref) (nth 10 ref) letter)
                                v-items))))
                    ;; упаковка: max H > колонка 0; наложения > 1+ (по убыв.)
                    (foreach pl (mark:ar-pack v-items)
                      (setq k      (nth 0 pl)
                            y      (nth 1 pl)
                            h      (nth 2 pl)
-                           number (nth 3 pl)
+                           letter (nth 3 pl)
                            x      (+ x-base (* k *mark:ar-line*)))
                      (if (not (mark:ar-exists x y placed))
                        (progn
-                         (setq obj (mark:ar-insert space x y number 0.0))
+                         (setq obj (mark:ar-insert space x y letter 0.0))
                          (if obj
                            (progn
                              (setq ve    (mark:ar-vla->ename obj)
@@ -3246,10 +3319,10 @@
                      (mark:ax-invoke-ok doc "EndUndoMark" nil))
 
                    (mark:out
-                     (strcat "[INFO] Горизонтальных (буквы): "
+                     (strcat "[INFO] Горизонтальных (номера): "
                              (itoa cnt-h)))
                    (mark:out
-                     (strcat "[INFO] Вертикальных (номера): "
+                     (strcat "[INFO] Вертикальных (буквы): "
                              (itoa cnt-v)))
                    (mark:out
                      (strcat "[INFO] Вставлено: "
@@ -4283,7 +4356,7 @@
 (defun mark:a-all (/ kw mode doc r cells pts new-fills)
   (mark:reset-state)
   (mark:out "========================================")
-  (mark:out (strcat " МАРКА — универсальный пакет  " *mark:rev* "  build " *mark:build*))
+  (mark:out (strcat " МАРКА — универсальный пакет  " *mark:rev*))
   (mark:out "========================================")
   (initget "Сетка Заполнения С З S Z 1 2")
   (setq kw (getkword "\nИсточник [Сетка/Заполнения] <Сетка>: "))
@@ -4382,6 +4455,5 @@
 ;;; ---- TEST 00 + сообщение загрузки ------------------------------------
 
 (mark:test-parens)
-(princ (strcat "\n[MARKZ] Загружен " *mark:rev*
-               " build " *mark:build* "\n"))
+(princ (strcat "\n[MARKZ] Загружен " *mark:rev* "\n"))
 (princ)
