@@ -50,10 +50,6 @@
 (setq *mark:specials*
   '(("Стемалит" . "стм")
     ("Сэндвич" . "снд")))
-;; старые суффиксы — только для разбора/совместимости
-(setq *mark:specials-old*
-  '("стем" "сэнд"))
-
 ;; Сколько блоков показывать в TEST 13
 (setq *mark:test13-show*  10)
 ;; Сколько строк ошибок показывать в одном тесте (остальное — сводка)
@@ -82,7 +78,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 26")
+(setq *mark:rev*    "Ред. 27")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -2643,15 +2639,13 @@
 
 ;;;--- Разбор Марки: [Витраж] + " " + БУКВА + НОМЕР + [суффикс] ---------
 
-;; Суффикс стм/снд (и старые стем/сэнд) не входит в индекс
+;; Суффикс стм/снд не входит в индекс
 (defun mark:ar-strip-suffix (m / out msc sp suf n list)
   (setq out (mark:trim (if m m ""))
         msc (strcase out)
         list nil)
   (foreach sp *mark:specials*
     (setq list (cons (strcase (cdr sp)) list)))
-  (foreach suf *mark:specials-old*
-    (setq list (cons (strcase suf) list)))
   (foreach suf list
     (setq n (strlen suf))
     (if (and (> (strlen msc) n)
@@ -3379,9 +3373,10 @@
 ;;;=====================================================================
 ;;;  МАРКАБЛОК / MARKFILL — вставка «Заполнение в витраж» по ячейкам
 ;;;  Режимы:
-;;;    1 Полилинии — выбирать границы ячеек (entsel)
-;;;    2 Точка     — ячейка за ячейкой, пока не Enter
-;;;    3 Массив    — линии/полилинии > сетка > внутренние ячейки
+;;;    Сетка (мультилинии) — выбор, как раньше
+;;;    Точка (мультилинии) — ячейка за ячейкой по мультилиниям
+;;;    Полилиния
+;;;    Точка (динамика) — в конце списка, каркас из блока
 ;;;  Вставка: левый нижний угол, W/H = габарит ячейки.
 ;;;  Атрибуты обнуляются — пользователь заполняет сам.
 ;;;=====================================================================
@@ -3906,13 +3901,119 @@
         (setq e (entnext e)))
       segs)))
 
-(defun mark:fill-inserts-at (pt / ss i e bb x y best besta a nm)
+(defun mark:fill-mat-inv (m / a b c d e f det)
+  (setq a (nth 0 m) b (nth 1 m) c (nth 2 m)
+        d (nth 3 m) e (nth 4 m) f (nth 5 m)
+        det (- (* a e) (* b d)))
+  (if (< (abs det) 1.0e-9)
+    nil
+    (list (/ e det) (/ (- b) det) (/ (- (* b f) (* e c)) det)
+          (/ (- d) det) (/ a det) (/ (- (* d c) (* a f)) det))))
+
+(defun mark:fill-pt-wcs (pt / p)
+  (setq p (vl-catch-all-apply 'trans (list pt 1 0)))
+  (if (or (vl-catch-all-error-p p) (null p))
+    pt
+    p))
+
+(defun mark:fill-def-bb (bname / segs s x0 y0 x1 y1)
+  (setq segs (mark:fill-def-segs bname (list 1.0 0.0 0.0 0.0 1.0 0.0) 0))
+  (if (null segs)
+    nil
+    (progn
+      (setq x0 (nth 0 (car segs))
+            y0 (nth 1 (car segs))
+            x1 x0
+            y1 y0)
+      (foreach s segs
+        (setq x0 (min x0 (nth 0 s) (nth 2 s))
+              y0 (min y0 (nth 1 s) (nth 3 s))
+              x1 (max x1 (nth 0 s) (nth 2 s))
+              y1 (max y1 (nth 1 s) (nth 3 s))))
+      (list x0 y0 x1 y1))))
+
+(defun mark:fill-def-bb-cached (bname / pair bb)
+  (setq pair (assoc bname *mark:dyn-bb*))
+  (if pair
+    (cdr pair)
+    (progn
+      (setq bb (mark:fill-def-bb bname))
+      (setq *mark:dyn-bb* (cons (cons bname bb) *mark:dyn-bb*))
+      bb)))
+
+(defun mark:fill-pt-in-ins (pt e / ed mat inv bb lp nm)
+  (setq ed (entget e)
+        nm (if ed (cdr (assoc 2 ed)) nil)
+        mat (if ed (mark:fill-mat-of ed) nil)
+        inv (if mat (mark:fill-mat-inv mat) nil)
+        bb (if (mark:strp nm) (mark:fill-def-bb-cached nm) nil))
+  (if (or (null inv) (null bb))
+    nil
+    (progn
+      (setq lp (mark:fill-mat-pt inv pt))
+      (and (>= (car lp) (- (nth 0 bb) 1.0))
+           (<= (car lp) (+ (nth 2 bb) 1.0))
+           (>= (cadr lp) (- (nth 1 bb) 1.0))
+           (<= (cadr lp) (+ (nth 3 bb) 1.0))))))
+
+(defun mark:fill-hits-best (hits / best)
+  (setq best nil)
+  (foreach h hits
+    (if (or (null best) (< (car h) (car best)))
+      (setq best h)))
+  best)
+
+(defun mark:fill-hits-drop (hits h / out dropped)
+  (setq out nil
+        dropped nil)
+  (foreach x hits
+    (if (and (null dropped)
+             (eq (cadr x) (cadr h)))
+      (setq dropped t)
+      (setq out (cons x out))))
+  (reverse out))
+
+(defun mark:fill-hits-sort (hits / best out)
+  (setq out nil)
+  (while hits
+    (setq best (mark:fill-hits-best hits)
+          out  (cons best out)
+          hits (mark:fill-hits-drop hits best)))
+  (reverse out))
+
+(defun mark:fill-hits-take (hits n / out)
+  (setq out nil)
+  (while (and hits (> n 0))
+    (setq out (cons (car hits) out)
+          hits (cdr hits)
+          n (1- n)))
+  (reverse out))
+
+(defun mark:fill-hit-area (pt e / bb x y a)
   (setq x (float (car pt))
         y (float (cadr pt))
+        bb (mark:cell-bb e)
+        a nil)
+  (if (and bb
+           (>= x (nth 0 bb)) (<= x (nth 2 bb))
+           (>= y (nth 1 bb)) (<= y (nth 3 bb))
+           (> (- (nth 2 bb) (nth 0 bb)) 1.0)
+           (> (- (nth 3 bb) (nth 1 bb)) 1.0))
+    (setq a (* (- (nth 2 bb) (nth 0 bb))
+               (- (nth 3 bb) (nth 1 bb)))))
+  (if (and (null a) (mark:fill-pt-in-ins pt e))
+    (progn
+      (setq bb (mark:fill-def-bb-cached (cdr (assoc 2 (entget e)))))
+      (if bb
+        (setq a (max 1.0 (* (- (nth 2 bb) (nth 0 bb))
+                            (- (nth 3 bb) (nth 1 bb))))))))
+  a)
+
+(defun mark:fill-insert-hits (pt / ss i e nm a hits nall)
+  (setq hits nil
+        nall 0
         ss (vl-catch-all-apply 'ssget
-             (list "X" (list (cons 0 "INSERT"))))
-        best nil
-        besta nil)
+             (list "X" (list (cons 0 "INSERT")))))
   (if (and ss (not (vl-catch-all-error-p ss)))
     (progn
       (setq i (sslength ss))
@@ -3922,19 +4023,18 @@
               nm (mark:fill-eff-name e))
         (if (not (mark:fill-skip-block? nm))
           (progn
-            (setq bb (mark:cell-bb e))
-            (if (and bb
-                     (>= x (nth 0 bb)) (<= x (nth 2 bb))
-                     (>= y (nth 1 bb)) (<= y (nth 3 bb))
-                     (> (- (nth 2 bb) (nth 0 bb)) 1.0)
-                     (> (- (nth 3 bb) (nth 1 bb)) 1.0))
-              (progn
-                (setq a (* (- (nth 2 bb) (nth 0 bb))
-                           (- (nth 3 bb) (nth 1 bb))))
-                (if (or (null besta) (< a besta))
-                  (setq besta a
-                        best  e)))))))))
-  best)
+            (setq nall (1+ nall)
+                  a (mark:fill-hit-area pt e))
+            (if a
+              (setq hits (cons (list a e) hits))))))))
+  (mark:out
+    (strcat "[INFO] Вставок в чертеже: " (itoa nall)
+            ", под точкой: " (itoa (length hits))))
+  (mark:fill-hits-take (mark:fill-hits-sort hits) 5))
+
+(defun mark:fill-inserts-at (pt / hits)
+  (setq hits (mark:fill-insert-hits pt))
+  (if hits (cadr (car hits)) nil))
 
 (defun mark:fill-block-segs-at (pt / e ed nm mat segs)
   (setq e (mark:fill-inserts-at pt))
@@ -3968,11 +4068,11 @@
         nil))))
 
 (defun mark:fill-mode-point (cells pts / pt ss i e verts bb
-                                 best best-area a r segs win bsegs)
-  (setq pt (getpoint "\nТочка внутри ячейки <Enter — конец>: "))
+                                 best best-area a r segs win)
+  (setq pt (getpoint "\nТочка (мультилинии) внутри ячейки <Enter — конец>: "))
   (if (null pt)
     (progn
-      (mark:out "[INFO] Конец режима «Точка».")
+      (mark:out "[INFO] Конец режима «Точка (мультилинии)».")
       (list nil nil 'cancel))
     (progn
       (setq ss (vl-catch-all-apply 'ssget
@@ -4007,17 +4107,6 @@
               (mark:out "[WARN] Габарит ячейки не взят.")
               (list cells pts))))
         (progn
-          (setq bsegs (mark:fill-block-segs-at pt)
-                r nil)
-          (if (and bsegs (>= (length bsegs) 4))
-            (progn
-              (setq r (mark:fill-try-segs bsegs pt cells pts))
-              (if r
-                r
-                (progn
-                  (mark:out "[INFO] В блоке ячейка под точкой не собрана.")
-                  (list cells pts))))
-            (progn
           (mark:out "[INFO] Замкнутой полилинии нет — ищем по сетке линий…")
           (setq win (if (and (numberp *mark:fill-window*)
                              (> *mark:fill-window* 0.0))
@@ -4064,7 +4153,7 @@
                           (setq r    (mark:fill-add cells pts bb)
                                 cells (car r)
                                 pts   (cadr r))
-                          (list cells pts))))))))))))))))
+                          (list cells pts))))))))))))))
 
 (defun mark:fill-segs->cells (segs / xs ys sx sy x0 x1 y0 y1
                                   ix iy nxs nys out ax tmp v
@@ -4479,7 +4568,7 @@
       (reverse out))))
 
 (defun mark:fill-mode-grid (cells pts / ss i e r segs total bb typ ed)
-  (mark:out "Выберите линии сетки (MLINE/LINE/ARC). Блоки стоек не нужны.")
+  (mark:out "Сетка (мультилинии): выберите мультилинии. Блоки стоек не нужны.")
   (setq ss (vl-catch-all-apply 'ssget (list (list (cons 0 "MLINE,LINE,ARC")))))
   (if (or (vl-catch-all-error-p ss) (null ss))
     (progn
@@ -4577,15 +4666,120 @@
                     " (время вставки: " (rtos t_ins 2 2) " с, "
                     "всего: " (rtos (/ (- (getvar "MILLISECS") t0) 1000.0) 2 2) " с)"))
           (reverse lst))))))
-(defun mark:fill-points-loop (/ going r n ins one acc-cells acc-pts)
+
+(defun mark:fill-pick-insert (/ sel e ed)
+  (mark:out "[INFO] Укажите линию динамического блока. Enter — пропуск этой точки.")
+  (setq sel (vl-catch-all-apply 'entsel
+              (list "\nДинамический блок <Enter — пропуск>: ")))
+  (if (or (vl-catch-all-error-p sel) (null sel) (null (car sel)))
+    nil
+    (progn
+      (setq e  (car sel)
+            ed (entget e))
+      (if (and ed (= "INSERT" (cdr (assoc 0 ed))))
+        e
+        (progn
+          (mark:out "[WARN] Выбран не блок. Кликните по линии каркаса блока.")
+          nil)))))
+
+(defun mark:fill-exploded-segs (lst depth / segs ent en ed typ sub)
+  (setq segs nil)
+  (if (and lst (listp lst) (< depth 3))
+    (foreach ent lst
+      (if ent
+        (progn
+          (setq en (vl-catch-all-apply 'vlax-vla-object->ename (list ent))
+                ed (if (and en (not (vl-catch-all-error-p en))) (entget en) nil)
+                typ (if ed (cdr (assoc 0 ed)) nil))
+          (cond
+            ((member typ '("LINE" "ARC" "LWPOLYLINE" "POLYLINE" "MLINE"))
+             (setq segs (append segs (mark:fill-local-segs en typ ed))))
+            ((and (= typ "INSERT") (< depth 2))
+             (setq sub (vl-catch-all-apply 'vlax-invoke (list ent "Explode")))
+             (if (and (not (vl-catch-all-error-p sub)) (listp sub))
+               (setq segs (append segs (mark:fill-exploded-segs sub (1+ depth)))))))
+          (vl-catch-all-apply 'vla-Delete (list ent))))))
+  segs)
+
+(defun mark:fill-explode-segs (e / doc obj copy lst segs)
+  (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
+        obj (mark:ax-catch-vla e)
+        segs nil)
+  (if (or (null doc) (null obj))
+    nil
+    (progn
+      (mark:ax-invoke-ok doc "StartUndoMark" nil)
+      (setq copy (vl-catch-all-apply 'vla-Copy (list obj)))
+      (if (or (vl-catch-all-error-p copy) (null copy))
+        (setq segs nil)
+        (progn
+          (setq lst (vl-catch-all-apply 'vlax-invoke (list copy "Explode")))
+          (if (or (vl-catch-all-error-p lst) (null lst) (not (listp lst)))
+            (progn
+              (vl-catch-all-apply 'vla-Delete (list copy))
+              (setq segs nil))
+            (setq segs (mark:fill-exploded-segs lst 0)))))
+      (mark:ax-invoke-ok doc "EndUndoMark" nil)
+      segs)))
+
+(defun mark:fill-segs-of-ins (e / ed nm mat segs)
+  (setq ed  (entget e)
+        nm  (if ed (cdr (assoc 2 ed)) nil)
+        mat (if ed (mark:fill-mat-of ed) nil)
+        segs (if (and nm mat) (mark:fill-def-segs nm mat 0) nil))
+  (mark:out
+    (strcat "[INFO] Блок «" (mark:fill-eff-name e)
+            "»: отрезков " (itoa (length segs))))
+  (if (or (null segs) (< (length segs) 4))
+    (progn
+      (mark:out "[INFO] В определении мало линий — читаю видимый каркас блока.")
+      (setq segs (mark:fill-explode-segs e))
+      (mark:out
+        (strcat "[INFO] Видимый каркас: отрезков " (itoa (length segs))))))
+  segs)
+
+(defun mark:fill-dyn-cell (pt cells pts / hits e segs r)
+  (setq r nil)
+  (if *mark:dyn-ins*
+    (setq hits (list (list 0.0 *mark:dyn-ins*)))
+    (setq hits (mark:fill-insert-hits pt)))
+  (if (null hits)
+    (progn
+      (setq e (mark:fill-pick-insert))
+      (if e
+        (setq *mark:dyn-ins* e
+              hits (list (list 0.0 e))))))
+  (foreach hit hits
+    (if (null r)
+      (progn
+        (setq e (cadr hit)
+              segs (mark:fill-segs-of-ins e))
+        (if (and segs (>= (length segs) 4))
+          (progn
+            (setq r (mark:fill-try-segs segs pt cells pts)))))))
+  (if r
+    r
+    (progn
+      (mark:out "[INFO] В динамическом блоке ячейка под точкой не собрана.")
+      (list cells pts))))
+
+(defun mark:fill-mode-dyn (cells pts / pt)
+  (setq pt (getpoint "\nТочка (динамика) внутри ячейки <Enter — конец>: "))
+  (if (null pt)
+    (progn
+      (mark:out "[INFO] Конец режима «Точка (динамика)».")
+      (list nil nil 'cancel))
+    (mark:fill-dyn-cell (mark:fill-pt-wcs pt) cells pts)))
+
+(defun mark:fill-points-loop (modefn start done / going r n ins one acc-cells acc-pts)
   (setq going     t
         n         0
         ins       nil
         acc-cells nil
         acc-pts   nil)
-  (mark:out "[INFO] Точка: ячейка за ячейкой. Enter — конец.")
+  (mark:out start)
   (while going
-    (setq r (mark:fill-mode-point acc-cells acc-pts))
+    (setq r (apply modefn (list acc-cells acc-pts)))
     (cond
       ((or (null r) (eq (caddr r) 'cancel))
        (setq going nil))
@@ -4597,18 +4791,18 @@
          (setq ins (append ins one)
                n   (length ins))))
       (t nil)))
-  (mark:out
-    (strcat "[INFO] Режим «Точка» завершён. Вставлено: " (itoa n)))
+  (mark:out (strcat done (itoa n)))
   ins)
 
 (defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list)
   (mark:cmd-line
-    "МАРКАБЛОК — вставка «Заполнение в витраж». Точка: ячейка за ячейкой, Enter — конец. Марки не пишет.")
+    "МАРКАБЛОК — вставка «Заполнение в витраж». Сетка и Точка — мультилинии. Точка (динамика) — в конце списка. Марки не пишет.")
   (mark:reset-state)
   (mark:banner)
   (mark:out "МАРКАБЛОК — вставка «Заполнение в витраж» по ячейкам")
-  (initget "Сетка Точка Полилиния S T P 1 2 3")
-  (setq kw (getkword "\nРежим [Сетка/Точка/Полилиния] <Сетка>: "))
+  (mark:out "Сетка (мультилинии) | Точка (мультилинии) | Полилиния | Точка (динамика)")
+  (initget "Сетка Точка Полилиния Динамика S T P D 1 2 3 4")
+  (setq kw (getkword "\nРежим [Сетка/Точка/Полилиния/Динамика] <Сетка>: "))
   (cond
     ((or (null kw) (= kw "Сетка") (= kw "S") (= kw "1"))
      (setq mode "3"))
@@ -4616,6 +4810,8 @@
      (setq mode "2"))
     ((or (= kw "Полилиния") (= kw "P") (= kw "3"))
      (setq mode "1"))
+    ((or (= kw "Динамика") (= kw "D") (= kw "4"))
+     (setq mode "4"))
     (t (setq mode "3")))
   (setq cells nil
         pts   nil
@@ -4623,7 +4819,21 @@
         t_geom_start (getvar "MILLISECS"))
   (cond
     ((= mode "2")
-     (setq ins-list (mark:fill-points-loop)))
+     (setq ins-list
+       (mark:fill-points-loop
+         'mark:fill-mode-point
+         "[INFO] Точка (мультилинии): ячейка за ячейкой. Enter — конец."
+         "[INFO] Режим «Точка (мультилинии)» завершён. Вставлено: ")))
+    ((= mode "4")
+     (setq *mark:dyn-ins* nil
+           *mark:dyn-bb*  nil
+           ins-list
+       (mark:fill-points-loop
+         'mark:fill-mode-dyn
+         "[INFO] Точка (динамика): ячейка за ячейкой. Enter — конец."
+         "[INFO] Режим «Точка (динамика)» завершён. Вставлено: "))
+     (setq *mark:dyn-ins* nil
+           *mark:dyn-bb*  nil))
     ((= mode "3")
      (setq r        (mark:fill-mode-grid cells pts)
            cells    (car r)
@@ -4769,5 +4979,5 @@
   "\nМАРКАРОВКА  — марки блоков в «Заполнение в витраж»"
   "\nМАРКАРЯД    — рядовка из блоков «Ряд заполнений»: номера снизу, буквы справа"
   "\nМАРКАТАБЛ   — ведомость"
-  "\nМАРКАБЛОК   — вставка заполнений; Точка — пока не Enter\n"))
+  "\nМАРКАБЛОК   — вставка заполнений; Сетка (мультилинии), Точка (мультилинии), Точка (динамика)\n"))
 (princ)
