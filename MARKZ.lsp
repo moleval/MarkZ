@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 41")
+(setq *mark:rev*    "Ред. 42")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -5523,19 +5523,9 @@
        (abs (- (nth 3 bb) (nth 1 bb))))
     1.0e12))
 
-(defun mark:fill-dyn-pick (hits / near far e)
-  ;; Все в окне, не 40 ближайших. Далёкий габарит не вытесняет стойку.
-  (setq near nil
-        far nil)
-  (foreach h hits
-    (cond
-      ((<= (car h) 600.0)
-       (setq near (cons h near)))
-      ((and (<= (car h) 2500.0) (< (mark:fill-bb-area (cadr h)) 8.0e6))
-       (setq far (cons h far)))))
-  (setq far (vl-sort far '(lambda (a b) (< (car a) (car b)))))
-  (setq far (mark:fill-hits-take far 220))
-  (mark:fill-hits-merge near far))
+(defun mark:fill-dyn-pick (hits)
+  ;; Габарит динблока больше ячейки. По площади не отсекать — иначе беру 0.
+  (mark:fill-hits-take hits 80))
 
 (defun mark:fill-dyn-cell (ptu ptw cells pts / all hits r)
   ;; Ячейка — пустота между вставками, не одна стойка.
@@ -5547,19 +5537,10 @@
             hits *mark:dyn-set*)))
   (if (null r)
     (progn
-      (setq all (mark:fill-dyn-candidates ptw 2500.0)
+      (setq all (mark:fill-dyn-candidates ptw 6000.0)
             hits (mark:fill-dyn-pick all))
       (mark:out
-        (strcat "[INFO] В пределах 2500 мм: " (itoa (length all))
-                ", беру " (itoa (length hits))))
-      (mark:fill-hit-report hits)
-      (setq r (mark:fill-dyn-from hits ptw cells pts))))
-  (if (and (null r) (< (length hits) 40))
-    (progn
-      (setq all (mark:fill-dyn-candidates ptw 5000.0)
-            hits (mark:fill-dyn-pick all))
-      (mark:out
-        (strcat "[INFO] В пределах 5000 мм: " (itoa (length all))
+        (strcat "[INFO] В пределах 6000 мм: " (itoa (length all))
                 ", беру " (itoa (length hits))))
       (mark:fill-hit-report hits)
       (setq r (mark:fill-dyn-from hits ptw cells pts))))
