@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 40")
+(setq *mark:rev*    "Ред. 41")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4967,6 +4967,7 @@
         *mark:line-vis* 0
         *mark:expl-n* 0
         *mark:def-n* 0
+        *mark:copy-left* 0
         *mark:dyn-quiet* t
         *mark:no-expl-undo* t)
   (foreach hit hits
@@ -5010,6 +5011,9 @@
               (itoa (if (numberp *mark:def-n*) *mark:def-n* 0))
               ", разборка "
               (itoa (if (numberp *mark:expl-n*) *mark:expl-n* 0)))))
+  (if (and (numberp *mark:copy-left*) (> *mark:copy-left* 0))
+    (mark:out
+      (strcat "[WARN] Не удалены копии блоков: " (itoa *mark:copy-left*))))
   (mark:out
     (strcat "[INFO] Отрезков каркаса: " (itoa (+ (length vs) (length hs)))
             "  вертикальных " (itoa (length vs))
@@ -5268,8 +5272,19 @@
              (setq sub (vl-catch-all-apply 'vlax-invoke (list ent "Explode")))
              (if (and (not (vl-catch-all-error-p sub)) (listp sub))
                (setq segs (append segs (mark:fill-exploded-segs sub (1+ depth)))))))
-          (vl-catch-all-apply 'vla-Delete (list ent))))))
+          (mark:fill-erase ent)))))
   segs)
+
+(defun mark:fill-erase (obj / en)
+  (if obj
+    (progn
+      (setq en (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+      (vl-catch-all-apply 'vla-Delete (list obj))
+      (if (and en (not (vl-catch-all-error-p en)) (entget en))
+        (vl-catch-all-apply 'entdel (list en)))
+      (if (and en (not (vl-catch-all-error-p en)) (entget en))
+        (setq *mark:copy-left*
+          (1+ (if (numberp *mark:copy-left*) *mark:copy-left* 0)))))))
 
 (defun mark:fill-explode-segs (e / doc obj copy lst segs)
   (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
@@ -5285,11 +5300,11 @@
         (setq segs nil)
         (progn
           (setq lst (vl-catch-all-apply 'vlax-invoke (list copy "Explode")))
-          (if (or (vl-catch-all-error-p lst) (null lst) (not (listp lst)))
-            (progn
-              (vl-catch-all-apply 'vla-Delete (list copy))
-              (setq segs nil))
-            (setq segs (mark:fill-exploded-segs lst 0)))))
+          (if (and (not (vl-catch-all-error-p lst)) (listp lst))
+            (setq segs (mark:fill-exploded-segs lst 0))
+            (setq segs nil))
+          ;; Explode динблока часто не съедает копию. Иначе она остаётся под оригиналом.
+          (mark:fill-erase copy)))
       (if (and (null *mark:pt-undo*) (null *mark:no-expl-undo*))
         (mark:ax-invoke-ok doc "EndUndoMark" nil))
       segs)))
@@ -5880,6 +5895,90 @@
   (mark:out (if ok "[TEST] Итог — OK" "[TEST] Итог — FAIL"))
   (princ))
 
+
+(defun mark:hex-val (s / i n c)
+  (setq i 1
+        n 0)
+  (while (and s (<= i (strlen s)))
+    (setq c (ascii (substr s i 1))
+          n (+ (* n 16)
+               (cond
+                 ((and (>= c 48) (<= c 57)) (- c 48))
+                 ((and (>= c 65) (<= c 70)) (- c 55))
+                 ((and (>= c 97) (<= c 102)) (- c 87))
+                 (t 0)))
+          i (1+ i)))
+  n)
+
+(defun mark:copy-key (e / ed p nm rot sx sy)
+  (setq ed (entget e)
+        p (if ed (cdr (assoc 10 ed)) nil)
+        nm (mark:fill-eff-name e))
+  (if (or (null p) (null (car p)) (mark:fill-skip-block? nm))
+    nil
+    (progn
+      (setq rot (cdr (assoc 50 ed))
+            sx (cdr (assoc 41 ed))
+            sy (cdr (assoc 42 ed)))
+      (strcat (if nm nm "?")
+              "|" (rtos (float (car p)) 2 2)
+              "|" (rtos (float (cadr p)) 2 2)
+              "|" (rtos (if (numberp rot) rot 0.0) 2 4)
+              "|" (rtos (if (numberp sx) sx 1.0) 2 4)
+              "|" (rtos (if (numberp sy) sy 1.0) 2 4)))))
+
+(defun c:МАРКАКОПИИ (/ ss i e key acc groups g keep n doc gone)
+  ;; Копии чтения каркаса лежат на оригинале. Оставляет одну вставку на точку.
+  (mark:out "МАРКАКОПИИ — убрать копии блоков с той же точкой вставки.")
+  (setq ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT"))))
+        acc nil
+        n 0)
+  (if (or (vl-catch-all-error-p ss) (null ss))
+    (mark:out "[INFO] Вставок нет.")
+    (progn
+      (setq i (sslength ss))
+      (mark:out (strcat "[INFO] Вставок в чертеже: " (itoa i)))
+      (repeat i
+        (setq i (1- i)
+              e (ssname ss i)
+              key (mark:copy-key e))
+        (if key
+          (setq acc (cons (cons key e) acc))))
+      (setq acc (vl-sort acc '(lambda (a b) (< (car a) (car b))))
+            groups nil
+            g nil
+            key nil)
+      (foreach pair acc
+        (if (and key (= (car pair) key))
+          (setq g (cons (cdr pair) g))
+          (progn
+            (if (and key (> (length g) 1))
+              (setq groups (cons g groups)))
+            (setq key (car pair)
+                  g (list (cdr pair))))))
+      (if (and key (> (length g) 1))
+        (setq groups (cons g groups)))
+      (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
+      (if doc (mark:ax-invoke-ok doc "StartUndoMark" nil))
+      (foreach g groups
+        (setq keep nil)
+        (foreach e g
+          (if (or (null keep)
+                  (< (mark:hex-val (cdr (assoc 5 (entget e))))
+                     (mark:hex-val (cdr (assoc 5 (entget keep))))))
+            (setq keep e)))
+        (foreach e g
+          (if (not (eq e keep))
+            (progn
+              (setq gone (vl-catch-all-apply 'entdel (list e)))
+              (if (not (vl-catch-all-error-p gone))
+                (setq n (1+ n)))))))
+      (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
+      (mark:out
+        (strcat "[INFO] Удалено лишних копий: " (itoa n)
+                ". На каждой точке оставлена одна вставка."))))
+  (princ))
+
 (defun c:МАРКАБЛОК () (mark:fill-main))
 (defun c:MARKFILL () (mark:fill-main))
 (defun c:Сетка-мультилинии () (setq *mark:fill-force* "3") (c:МАРКАБЛОК))
@@ -5948,5 +6047,6 @@
   "\nМАРКАТАБЛ   — ведомость"
   "\nМАРКАБЛОК   — Сетка-мультилинии, Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии"
   "\nТочка-динамика — отдельная команда; в списке: 4 или Д"
-  "\nМАРКАТЕСТ   — проверка ячейки на тестовом блоке из линий\n"))
+  "\nМАРКАТЕСТ   — проверка ячейки на тестовом блоке из линий"
+  "\nМАРКАКОПИИ — убрать копии динблоков, оставшиеся на оригиналах\n"))
 (princ)
