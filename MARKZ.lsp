@@ -78,7 +78,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 29")
+(setq *mark:rev*    "Ред. 30")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4805,7 +4805,7 @@
       (list cells pts))))
 
 (defun mark:fill-mode-dyn (cells pts / pt)
-  (setq pt (getpoint "\nТочка (динамика) внутри ячейки <Enter — конец>: "))
+  (setq pt (getpoint "\nДинамика-точка внутри ячейки <Enter — конец>: "))
   (if (null pt)
     (progn
       (mark:out "[INFO] Конец режима «Точка (динамика)».")
@@ -4835,26 +4835,34 @@
   (mark:out (strcat done (itoa n)))
   ins)
 
-(defun mark:fill-ask-mode (/ kw)
-  ;; Открытый список initget. Пробел и скобки в ключе нельзя:
-  ;; иначе AutoCAD прячет список под стрелку, а «Точка» попадает в мультилинии.
-  (initget "Сетка-мультилинии Точка-мультилинии Точка-динамика Полилинии Динамика 1 2 3 4")
+(defun mark:fill-ask-mode (/ kw mode)
+  ;; Два ключа на «Точка» нельзя: буква Т берёт первый и включает мультилинии.
+  ;; Открытый список: разные первые буквы. Пробел и скобки в ключе нельзя.
+  (initget "Сетка-мультилинии Мультилинии-точка Динамика-точка Полилинии 1 2 3 4")
   (setq kw (getkword
-    "\nРежим [Сетка-мультилинии/Точка-мультилинии/Точка-динамика/Полилинии] <Сетка-мультилинии>: "))
+    "\nРежим [Сетка-мультилинии/Мультилинии-точка/Динамика-точка/Полилинии] <Сетка-мультилинии>: "))
   (cond
     ((or (null kw) (= kw "Сетка-мультилинии") (= kw "1"))
-     "3")
-    ((or (= kw "Точка-мультилинии") (= kw "2"))
-     "2")
-    ((or (= kw "Точка-динамика") (= kw "Динамика") (= kw "3"))
-     "4")
+     (setq mode "3"))
+    ((or (= kw "Мультилинии-точка") (= kw "2"))
+     (setq mode "2"))
+    ((or (= kw "Динамика-точка") (= kw "3"))
+     (setq mode "4"))
     ((or (= kw "Полилинии") (= kw "4"))
-     "1")
-    (t "3")))
+     (setq mode "1"))
+    (t (setq mode "3")))
+  (mark:out
+    (strcat "[INFO] Ключ: " (if kw kw "<Enter>")
+            " = "
+            (cond ((= mode "2") "Мультилинии-точка")
+                  ((= mode "4") "Динамика-точка")
+                  ((= mode "1") "Полилинии")
+                  (t "Сетка-мультилинии"))))
+  mode)
 
 (defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list)
   (mark:cmd-line
-    "МАРКАБЛОК — вставка «Заполнение в витраж». Открытый список: Сетка-мультилинии, Точка-мультилинии, Точка-динамика, Полилинии. Марки не пишет.")
+    "МАРКАБЛОК — вставка «Заполнение в витраж». Список: Сетка-мультилинии, Мультилинии-точка, Динамика-точка, Полилинии. Марки не пишет.")
   (mark:reset-state)
   (mark:banner)
   (mark:out "МАРКАБЛОК — вставка «Заполнение в витраж» по ячейкам")
@@ -4876,8 +4884,8 @@
            ins-list
        (mark:fill-points-loop
          'mark:fill-mode-dyn
-         "[INFO] Точка (динамика): ячейка за ячейкой. Enter — конец."
-         "[INFO] Режим «Точка (динамика)» завершён. Вставлено: "))
+         "[INFO] Динамика-точка: ячейка из блока, не из мультилиний чертежа. Enter — конец."
+         "[INFO] Режим «Динамика-точка» завершён. Вставлено: "))
      (setq *mark:dyn-ins* nil
            *mark:dyn-bb*  nil))
     ((= mode "3")
@@ -4964,6 +4972,102 @@
 (defun c:MARKAR () (mark:ar-main))
 (defun c:MARKA () (mark:a-all))
 (defun c:МАРКА () (mark:a-all))
+
+(defun mark:test-line (x0 y0 x1 y1)
+  (entmake (list '(0 . "LINE")
+                 (list 10 x0 y0 0.0)
+                 (list 11 x1 y1 0.0))))
+
+(defun mark:test-purge (nm / ss i e doc blocks blk)
+  (setq ss (vl-catch-all-apply 'ssget
+             (list "X" (list '(0 . "INSERT") (cons 2 nm)))))
+  (if (and ss (not (vl-catch-all-error-p ss)))
+    (progn
+      (setq i (sslength ss))
+      (repeat i
+        (setq i (1- i))
+        (entdel (ssname ss i)))))
+  (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
+  (if doc
+    (progn
+      (setq blocks (mark:ax-get doc "Blocks")
+            blk (if blocks
+                  (vl-catch-all-apply 'vla-item (list blocks nm))
+                  nil))
+      (if (and blk (not (vl-catch-all-error-p blk)))
+        (vl-catch-all-apply 'vla-delete (list blk)))))
+  t)
+
+(defun mark:test-make-block (/ r)
+  (setq r (entmake (list '(0 . "BLOCK")
+                         '(2 . "MARKZ_TEST_CELL")
+                         '(70 . 0)
+                         (list 10 0.0 0.0 0.0))))
+  (if (null r)
+    nil
+    (progn
+      (mark:test-line 0.0 0.0 2000.0 0.0)
+      (mark:test-line 0.0 1000.0 2000.0 1000.0)
+      (mark:test-line 0.0 0.0 0.0 1000.0)
+      (mark:test-line 2000.0 0.0 2000.0 1000.0)
+      (mark:test-line 800.0 0.0 800.0 1000.0)
+      (entmake '((0 . "ENDBLK")))
+      t)))
+
+(defun mark:test-insert (nm x y)
+  (entmake (list '(0 . "INSERT")
+                 (cons 2 nm)
+                 (list 10 x y 0.0)
+                 '(41 . 1.0)
+                 '(42 . 1.0)
+                 '(50 . 0.0))))
+
+(defun c:МАРКАТЕСТ (/ doc e segs bb w h ok x y hits found)
+  (mark:out "========================================")
+  (mark:out (strcat " ТЕСТ ЯЧЕЙКИ БЛОКА  " *mark:rev*))
+  (mark:out "Прямоугольник 2000x1000, стойка на 800. Ожидание: W=800 H=1000")
+  (mark:out "========================================")
+  (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
+        ok nil)
+  (if doc (mark:ax-invoke-ok doc "StartUndoMark" nil))
+  (mark:test-purge "MARKZ_TEST_CELL")
+  (if (not (mark:test-make-block))
+    (mark:out "[TEST] Блок не создан — FAIL")
+    (progn
+      (setq e (mark:test-insert "MARKZ_TEST_CELL" 100000.0 100000.0))
+      (if (null e)
+        (mark:out "[TEST] Вставка не создана — FAIL")
+        (progn
+          (setq x 100400.0
+                y 100500.0
+                segs (mark:fill-segs-of-ins e)
+                bb (if segs (mark:fill-cell-by-rays segs (list x y)) nil))
+          (mark:out (strcat "[TEST] Отрезков из блока: " (itoa (length segs))))
+          (if (null bb)
+            (mark:out "[TEST] Ячейка по отрезкам блока — FAIL")
+            (progn
+              (setq w (- (nth 2 bb) (nth 0 bb))
+                    h (- (nth 3 bb) (nth 1 bb))
+                    ok (and (> w 700.0) (< w 900.0)
+                            (> h 900.0) (< h 1100.0)))
+              (mark:out
+                (strcat "[TEST] Ячейка W=" (rtos w 2 1)
+                        " H=" (rtos h 2 1)
+                        (if ok " — OK" " — FAIL")))))
+          (setq hits (mark:fill-insert-hits (list x y))
+                found nil)
+          (foreach hit hits
+            (if (eq (cadr hit) e) (setq found t)))
+          (mark:out
+            (strcat "[TEST] Окно нашло тестовый блок: "
+                    (if found "OK" "FAIL")))
+          (if (null found) (setq ok nil))
+          (entdel e)))))
+  (mark:test-purge "MARKZ_TEST_CELL")
+  (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
+  (mark:out (if ok "[TEST] Итог — OK" "[TEST] Итог — FAIL"))
+  (princ))
+
 (defun c:МАРКАБЛОК () (mark:fill-main))
 (defun c:MARKFILL () (mark:fill-main))
 
@@ -5025,5 +5129,6 @@
   "\nМАРКАРОВКА  — марки блоков в «Заполнение в витраж»"
   "\nМАРКАРЯД    — рядовка из блоков «Ряд заполнений»: номера снизу, буквы справа"
   "\nМАРКАТАБЛ   — ведомость"
-  "\nМАРКАБЛОК   — Сетка-мультилинии, Точка-мультилинии, Точка-динамика, Полилинии\n"))
+  "\nМАРКАБЛОК   — Сетка-мультилинии, Мультилинии-точка, Динамика-точка, Полилинии"
+  "\nМАРКАТЕСТ   — проверка ячейки на тестовом блоке из линий\n"))
 (princ)
