@@ -78,7 +78,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 31")
+(setq *mark:rev*    "Ред. 32")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3541,9 +3541,9 @@
                 pts   (cons (list x0 y0) pts))
           (mark:out
             (strcat "  ячейка " (itoa (length cells))
-                    ": " (rtos x0 2 1) "," (rtos y0 2 1)
-                    "  W=" (rtos w 2 1)
-                    "  H=" (rtos h 2 1)))
+                    ": " (rtos x0 2 4) "," (rtos y0 2 4)
+                    "  W=" (rtos w 2 4)
+                    "  H=" (rtos h 2 4)))
           (list cells pts))))))
 
 ;;; ---- вершины / точка в полигоне --------------------------------------
@@ -3744,10 +3744,8 @@
   (if (and left right bottom top
            (> (- right left) 50.0)
            (> (- top bottom) 50.0))
-    (list (mark:round1 left)
-          (mark:round1 bottom)
-          (mark:round1 right)
-          (mark:round1 top))
+    ;; Координаты не округляем: база вставки — точный левый нижний угол.
+    (list left bottom right top)
     nil))
 
 
@@ -4185,10 +4183,10 @@
 
 (defun mark:fill-mode-point (cells pts / pt ss i e verts bb
                                  best best-area a r segs win)
-  (setq pt (getpoint "\nТочка (мультилинии) внутри ячейки <Enter — конец>: "))
+  (setq pt (getpoint "\nТочка-мультилинии внутри ячейки <Enter — конец>: "))
   (if (null pt)
     (progn
-      (mark:out "[INFO] Конец режима «Точка (мультилинии)».")
+      (mark:out "[INFO] Конец режима «Точка-мультилинии».")
       (list nil nil 'cancel))
     (progn
       (setq ss (vl-catch-all-apply 'ssget
@@ -4683,8 +4681,40 @@
         (setq out (cons (/ sum (float n)) out)))
       (reverse out))))
 
+
+(defun mark:fill-mode-grid-dyn (cells pts / hits segs r bb mid ray box)
+  (mark:out "Сетка-динамика: выберите стойки и ригели.")
+  (setq hits (mark:fill-pick-frame))
+  (if (null hits)
+    (progn
+      (mark:out "[INFO] Выбор отменён.")
+      (list cells pts))
+    (progn
+      (setq segs (mark:fill-hits-segs hits))
+      (mark:out
+        (strcat "[INFO] Отрезков каркаса: " (itoa (length segs))))
+      (if (< (length segs) 4)
+        (progn
+          (mark:out "[WARN] Мало отрезков в выбранных блоках.")
+          (list cells pts))
+        (progn
+          (setq r (mark:fill-segs->cells segs))
+          (mark:out
+            (strcat "[INFO] Сетка: осей X " (itoa (cadr r))
+                    " Y " (itoa (caddr r))
+                    "  ячеек " (itoa (length (car r)))))
+          (foreach bb (car r)
+            (setq mid (list (/ (+ (nth 0 bb) (nth 2 bb)) 2.0)
+                            (/ (+ (nth 1 bb) (nth 3 bb)) 2.0))
+                  ray (mark:fill-cell-by-rays segs mid)
+                  box (if ray ray bb)
+                  r   (mark:fill-add cells pts box)
+                  cells (car r)
+                  pts   (cadr r)))
+          (list cells pts))))))
+
 (defun mark:fill-mode-grid (cells pts / ss i e r segs total bb typ ed)
-  (mark:out "Сетка (мультилинии): выберите мультилинии. Блоки стоек не нужны.")
+  (mark:out "Сетка-мультилинии: выберите мультилинии. Блоки стоек не нужны.")
   (setq ss (vl-catch-all-apply 'ssget (list (list (cons 0 "MLINE,LINE,ARC")))))
   (if (or (vl-catch-all-error-p ss) (null ss))
     (progn
@@ -4752,12 +4782,13 @@
           (if (and doc (not *mark:batch-undo*))
             (mark:ax-invoke-ok doc "StartUndoMark" nil))
           (foreach cell cells
-            (setq x0 (mark:round1 (nth 0 cell))
-                  y0 (mark:round1 (nth 1 cell))
-                  x1 (mark:round1 (nth 2 cell))
-                  y1 (mark:round1 (nth 3 cell))
-                  w  (- x1 x0)
-                  h  (- y1 y0))
+            ;; Угол точный. Размер блока — кратно миллиметру.
+            (setq x0 (float (nth 0 cell))
+                  y0 (float (nth 1 cell))
+                  x1 (float (nth 2 cell))
+                  y1 (float (nth 3 cell))
+                  w  (mark:round1 (- x1 x0))
+                  h  (mark:round1 (- y1 y0)))
             (setq obj (mark:fill-insert space x0 y0))
             (if obj
               (progn
@@ -4770,9 +4801,9 @@
                   (setq lst (cons ins lst)))
                 (mark:out
                   (strcat "  вставка " (itoa n)
-                          ": " (rtos x0 2 1) "," (rtos y0 2 1)
-                          "  W=" (rtos w 2 1)
-                          "  H=" (rtos h 2 1))))))
+                          ": " (rtos x0 2 4) "," (rtos y0 2 4)
+                          "  W=" (rtos w 2 0)
+                          "  H=" (rtos h 2 0))))))
           (setq t1 (getvar "MILLISECS")
                 t_ins (/ (- t1 t0) 1000.0))
           (if (and doc (not *mark:batch-undo*))
@@ -4920,10 +4951,10 @@
       (list cells pts))))
 
 (defun mark:fill-mode-dyn (cells pts / pt)
-  (setq pt (getpoint "\nДинамика-точка внутри ячейки <Enter — конец>: "))
+  (setq pt (getpoint "\nТочка-динамика внутри ячейки <Enter — конец>: "))
   (if (null pt)
     (progn
-      (mark:out "[INFO] Конец режима «Динамика-точка».")
+      (mark:out "[INFO] Конец режима «Точка-динамика».")
       (list nil nil 'cancel))
     (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts)))
 
@@ -4951,33 +4982,38 @@
   ins)
 
 (defun mark:fill-ask-mode (/ kw mode)
-  ;; Два ключа на «Точка» нельзя: буква Т берёт первый и включает мультилинии.
-  ;; Открытый список: разные первые буквы. Пробел и скобки в ключе нельзя.
-  (initget "Сетка-мультилинии Мультилинии-точка Динамика-точка Полилинии 1 2 3 4")
+  ;; Имена как задал пользователь. Буква С или Т берёт первый ключ на эту букву.
+  ;; Однозначно: 1 2 3 4 5, либо полное имя.
+  (initget (strcat "Сетка-мультилинии Точка-мультилинии Сетка-динамика "
+                   "Точка-динамика Полилинии Мультилинии-точка Динамика-точка "
+                   "1 2 3 4 5"))
   (setq kw (getkword
-    "\nРежим [Сетка-мультилинии/Мультилинии-точка/Динамика-точка/Полилинии] <Сетка-мультилинии>: "))
+    "\nРежим [Сетка-мультилинии/Точка-мультилинии/Сетка-динамика/Точка-динамика/Полилинии] <Сетка-мультилинии>: "))
   (cond
     ((or (null kw) (= kw "Сетка-мультилинии") (= kw "1"))
      (setq mode "3"))
-    ((or (= kw "Мультилинии-точка") (= kw "2"))
+    ((or (= kw "Точка-мультилинии") (= kw "Мультилинии-точка") (= kw "2"))
      (setq mode "2"))
-    ((or (= kw "Динамика-точка") (= kw "3"))
+    ((or (= kw "Сетка-динамика") (= kw "3"))
+     (setq mode "5"))
+    ((or (= kw "Точка-динамика") (= kw "Динамика-точка") (= kw "4"))
      (setq mode "4"))
-    ((or (= kw "Полилинии") (= kw "4"))
+    ((or (= kw "Полилинии") (= kw "5"))
      (setq mode "1"))
     (t (setq mode "3")))
   (mark:out
     (strcat "[INFO] Ключ: " (if kw kw "<Enter>")
             " = "
-            (cond ((= mode "2") "Мультилинии-точка")
-                  ((= mode "4") "Динамика-точка")
+            (cond ((= mode "2") "Точка-мультилинии")
+                  ((= mode "5") "Сетка-динамика")
+                  ((= mode "4") "Точка-динамика")
                   ((= mode "1") "Полилинии")
                   (t "Сетка-мультилинии"))))
   mode)
 
 (defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list)
   (mark:cmd-line
-    "МАРКАБЛОК — вставка «Заполнение в витраж». Список: Сетка-мультилинии, Мультилинии-точка, Динамика-точка, Полилинии. Марки не пишет.")
+    "МАРКАБЛОК — вставка «Заполнение в витраж». Список: Сетка-мультилинии, Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии. Марки не пишет.")
   (mark:reset-state)
   (mark:banner)
   (mark:out "МАРКАБЛОК — вставка «Заполнение в витраж» по ячейкам")
@@ -4991,8 +5027,8 @@
      (setq ins-list
        (mark:fill-points-loop
          'mark:fill-mode-point
-         "[INFO] Точка (мультилинии): ячейка за ячейкой. Enter — конец."
-         "[INFO] Режим «Точка (мультилинии)» завершён. Вставлено: ")))
+         "[INFO] Точка-мультилинии: ячейка за ячейкой. Enter — конец."
+         "[INFO] Режим «Точка-мультилинии» завершён. Вставлено: ")))
     ((= mode "4")
      (setq *mark:dyn-ins* nil
            *mark:dyn-set* nil
@@ -5000,11 +5036,19 @@
            ins-list
        (mark:fill-points-loop
          'mark:fill-mode-dyn
-         "[INFO] Динамика-точка: ячейка из блока, не из мультилиний чертежа. Enter — конец."
-         "[INFO] Режим «Динамика-точка» завершён. Вставлено: "))
+         "[INFO] Точка-динамика: ячейка из блоков каркаса. Enter — конец."
+         "[INFO] Режим «Точка-динамика» завершён. Вставлено: "))
      (setq *mark:dyn-ins* nil
            *mark:dyn-set* nil
            *mark:dyn-bb*  nil))
+    ((= mode "5")
+     (setq r        (mark:fill-mode-grid-dyn cells pts)
+           cells    (car r)
+           pts      (cadr r)
+           t_geom   (/ (- (getvar "MILLISECS") t_geom_start) 1000.0)
+           ins-list (mark:fill-apply cells pts))
+     (if cells
+       (mark:out (strcat "[ТАЙМИНГ] Расчет геометрии сетки: " (rtos t_geom 2 2) " с"))))
     ((= mode "3")
      (setq r        (mark:fill-mode-grid cells pts)
            cells    (car r)
@@ -5249,6 +5293,6 @@
   "\nМАРКАРОВКА  — марки блоков в «Заполнение в витраж»"
   "\nМАРКАРЯД    — рядовка из блоков «Ряд заполнений»: номера снизу, буквы справа"
   "\nМАРКАТАБЛ   — ведомость"
-  "\nМАРКАБЛОК   — Сетка-мультилинии, Мультилинии-точка, Динамика-точка, Полилинии"
+  "\nМАРКАБЛОК   — Сетка-мультилинии, Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии"
   "\nМАРКАТЕСТ   — проверка ячейки на тестовом блоке из линий\n"))
 (princ)
