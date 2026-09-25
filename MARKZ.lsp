@@ -102,7 +102,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 35")
+(setq *mark:rev*    "–ед. 36")
 
 ;; ћј– ј: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4292,22 +4292,68 @@
                 "ї, отрезков " (itoa (length segs))))
       segs)))
 
+(defun mark:fill-seg-hw (s)
+  (if (and (> (length s) 4) (numberp (nth 4 s)))
+    (float (nth 4 s))
+    25.0))
+
+(defun mark:fill-box-closed (segs box / x0 y0 x1 y1 tol s xa ya xb yb hw sx sy
+                                  okL okR okB okT)
+  ;; „етыре стороны должны доходить до углов. »наче это не €чейка.
+  (setq x0 (nth 0 box)
+        y0 (nth 1 box)
+        x1 (nth 2 box)
+        y1 (nth 3 box)
+        tol *mark:fill-tol*
+        okL nil
+        okR nil
+        okB nil
+        okT nil)
+  (foreach s segs
+    (setq xa (min (float (nth 0 s)) (float (nth 2 s)))
+          ya (min (float (nth 1 s)) (float (nth 3 s)))
+          xb (max (float (nth 0 s)) (float (nth 2 s)))
+          yb (max (float (nth 1 s)) (float (nth 3 s)))
+          hw (mark:fill-seg-hw s)
+          sx (/ (+ (float (nth 0 s)) (float (nth 2 s))) 2.0)
+          sy (/ (+ (float (nth 1 s)) (float (nth 3 s))) 2.0))
+    (if (and (<= (- xb xa) 10.0)
+             (<= ya (+ y0 tol))
+             (>= yb (- y1 tol)))
+      (progn
+        (if (<= (abs (- (+ sx hw) x0)) tol) (setq okL t))
+        (if (<= (abs (- (- sx hw) x1)) tol) (setq okR t))))
+    (if (and (<= (- yb ya) 10.0)
+             (<= xa (+ x0 tol))
+             (>= xb (- x1 tol)))
+      (progn
+        (if (<= (abs (- (+ sy hw) y0)) tol) (setq okB t))
+        (if (<= (abs (- (- sy hw) y1)) tol) (setq okT t)))))
+  (and okL okR okB okT))
+
 (defun mark:fill-try-segs (segs pt cells pts / bb r)
   (setq bb (mark:fill-cell-by-rays segs pt))
-  (if bb
-    (progn
-      (mark:out "[INFO] ¬нутренний контур €чейки найден лучами.")
-      (mark:fill-add cells pts bb))
-    (progn
-      (setq r  (mark:fill-segs->cells segs)
-            bb (mark:fill-smallest-cell (car r) pt))
-      (mark:out
-        (strcat "[INFO] —етка блока: осей X " (itoa (cadr r))
-                " Y " (itoa (caddr r))
-                "  €чеек " (itoa (length (car r)))))
-      (if bb
-        (mark:fill-add cells pts bb)
-        nil))))
+  (cond
+    ((and bb (mark:fill-box-closed segs bb))
+     (mark:out "[INFO] ¬нутренний контур €чейки найден лучами.")
+     (mark:fill-add cells pts bb))
+    (bb
+     (mark:out "[INFO] Ћучи нашли незамкнутый контур Ч заполнение не ставлю.")
+     nil)
+    (t
+     (setq r  (mark:fill-segs->cells segs)
+           bb (mark:fill-smallest-cell (car r) pt))
+     (mark:out
+       (strcat "[INFO] —етка блока: осей X " (itoa (cadr r))
+               " Y " (itoa (caddr r))
+               "  €чеек " (itoa (length (car r)))))
+     (cond
+       ((and bb (mark:fill-box-closed segs bb))
+        (mark:fill-add cells pts bb))
+       (bb
+        (mark:out "[INFO] ячейка сетки не замкнута Ч пропуск.")
+        nil)
+       (t nil)))))
 
 (defun mark:fill-mode-point (cells pts / pt ss i e verts bb
                                  best best-area a r segs win)
