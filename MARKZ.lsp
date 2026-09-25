@@ -102,7 +102,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 37")
+(setq *mark:rev*    "–ед. 38")
 
 ;; ћј– ј: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -5311,8 +5311,46 @@
                 ", видимые линии, отступ 0"))))
   segs)
 
-(defun mark:fill-dyn-cell (ptu ptw cells pts / hits segs r win)
-  ;; ячейка Ч пустота между вставками (стойка, ригель), не одна стойка.
+(defun mark:fill-try-rays (segs pt cells pts / bb)
+  (setq bb (mark:fill-cell-by-rays segs pt))
+  (cond
+    ((and bb (mark:fill-box-closed segs bb))
+     (mark:out "[INFO] ¬нутренний контур €чейки найден лучами.")
+     (mark:fill-add cells pts bb))
+    (bb
+     (mark:out "[INFO] Ћучи нашли незамкнутый контур Ч заполнение не ставлю.")
+     nil)
+    (t nil)))
+
+(defun mark:fill-hit-cell (hits pt cells pts / boxes bb)
+  ;; “а же €чейка, что в —етка-динамика: стороны могут быть из нескольких линий.
+  (setq boxes (mark:fill-closed-cells hits)
+        bb (if boxes (mark:fill-smallest-cell boxes pt) nil))
+  (cond
+    (bb
+     (mark:out "[INFO] ячейка из замкнутого контура блоков.")
+     (mark:fill-add cells pts bb))
+    (boxes
+     (mark:out "[INFO] «амкнутые €чейки есть, но точка вне их.")
+     nil)
+    (t nil)))
+
+(defun mark:fill-dyn-from (hits pt cells pts / r segs)
+  (setq r nil)
+  (if hits
+    (setq r (mark:fill-hit-cell hits pt cells pts)))
+  (if (null r)
+    (progn
+      (setq segs (mark:fill-hits-segs hits))
+      (mark:out
+        (strcat "[INFO] ќтрезков каркаса: " (itoa (length segs))))
+      (if (>= (length segs) 4)
+        (setq r (mark:fill-try-rays segs pt cells pts)))))
+  r)
+
+(defun mark:fill-dyn-cell (ptu ptw cells pts / hits r win)
+  ;; ячейка Ч пустота между вставками, не одна стойка.
+  ;; Ћинии динблока: как —етка-динамика, без отступа 25 мм.
   (setq win (if (and (numberp *mark:fill-window*) (> *mark:fill-window* 0.0))
               *mark:fill-window*
               5000.0)
@@ -5322,31 +5360,17 @@
       (setq hits *mark:dyn-set*)
       (mark:out "[INFO]  аркас прежний."))
     (setq hits (mark:fill-insert-hits ptu ptw)))
-  (setq segs (mark:fill-hits-segs hits))
-  (mark:out
-    (strcat "[INFO] ќтрезков каркаса: " (itoa (length segs))))
-  (if (>= (length segs) 4)
-    (setq r (mark:fill-try-segs segs ptw cells pts)))
+  (setq r (mark:fill-dyn-from hits ptw cells pts))
   (if (and (null r) hits)
     (progn
       (mark:out "[INFO] ¬ этом окне €чейка не собрана Ч беру блоки дальше.")
-      (setq hits (mark:fill-near-inserts ptw (* win 4.0))
-            segs (mark:fill-hits-segs hits))
-      (mark:out
-        (strcat "[INFO] ќтрезков каркаса: " (itoa (length segs))))
-      (if (>= (length segs) 4)
-        (setq r (mark:fill-try-segs segs ptw cells pts)))))
+      (setq hits (mark:fill-near-inserts ptw (* win 4.0)))
+      (setq r (mark:fill-dyn-from hits ptw cells pts))))
   (if (and (null r) (null *mark:dyn-set*))
     (progn
       (setq hits (mark:fill-pick-frame))
       (if hits
-        (progn
-          (setq *mark:dyn-set* hits
-                segs (mark:fill-hits-segs hits))
-          (mark:out
-            (strcat "[INFO] ќтрезков выбранного каркаса: " (itoa (length segs))))
-          (if (>= (length segs) 4)
-            (setq r (mark:fill-try-segs segs ptw cells pts))))
+        (setq r (mark:fill-dyn-from hits ptw cells pts))
         (mark:out "[INFO] Ѕлоки каркаса не выбраны."))))
   (if r
     (progn
