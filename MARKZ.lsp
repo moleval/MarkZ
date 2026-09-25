@@ -102,7 +102,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 36")
+(setq *mark:rev*    "–ед. 37")
 
 ;; ћј– ј: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3588,9 +3588,13 @@
           0.0)))
 
 (defun mark:fill-end-undo (/ doc)
-  (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
-  (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
-  (setq *mark:fill-undo-off* t))
+  ;; √руппу режима Ђточкаї не закрываем: еЄ закроет конец захода.
+  (if *mark:pt-undo*
+    (setq *mark:fill-undo-off* t)
+    (progn
+      (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
+      (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
+      (setq *mark:fill-undo-off* t))))
 
 (defun mark:fill-insert (space x y / obj err alt msg)
   (cond
@@ -5236,7 +5240,8 @@
   (if (or (null doc) (null obj))
     nil
     (progn
-      (mark:ax-invoke-ok doc "StartUndoMark" nil)
+      (if (null *mark:pt-undo*)
+        (mark:ax-invoke-ok doc "StartUndoMark" nil))
       (setq copy (vl-catch-all-apply 'vla-Copy (list obj)))
       (if (or (vl-catch-all-error-p copy) (null copy))
         (setq segs nil)
@@ -5247,7 +5252,8 @@
               (vl-catch-all-apply 'vla-Delete (list copy))
               (setq segs nil))
             (setq segs (mark:fill-exploded-segs lst 0)))))
-      (mark:ax-invoke-ok doc "EndUndoMark" nil)
+      (if (null *mark:pt-undo*)
+        (mark:ax-invoke-ok doc "EndUndoMark" nil))
       segs)))
 
 (defun mark:fill-def-has-mline (bname depth / rec e ed typ nm hit)
@@ -5358,13 +5364,41 @@
       (list nil nil 'cancel))
     (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts)))
 
-(defun mark:fill-points-loop (modefn start done / going r n ins one acc-cells acc-pts)
+(defun mark:fill-pt-undo-end (/ doc)
+  (if *mark:pt-undo*
+    (progn
+      (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
+      (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))))
+  (setq *mark:pt-undo* nil
+        *mark:batch-undo* nil))
+
+(defun mark:fill-pt-err (msg)
+  (mark:fill-pt-undo-end)
+  (setq *error* *mark:pt-olderr*)
+  (if (and msg
+           (/= msg "Function cancelled")
+           (/= msg "quit / exit abort"))
+    (princ (strcat "\n" msg)))
+  (princ))
+
+(defun mark:fill-points-loop (modefn start done / going r n ins one acc-cells acc-pts doc)
+  ;; ќдин UNDO на весь заход: все вставки режима Ђточкаї.
+  (setq *mark:pt-olderr* *error*
+        *error* mark:fill-pt-err
+        doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
+        *mark:batch-undo* t
+        *mark:pt-undo* nil)
+  (if doc
+    (progn
+      (mark:ax-invoke-ok doc "StartUndoMark" nil)
+      (setq *mark:pt-undo* t)))
   (setq going     t
         n         0
         ins       nil
         acc-cells nil
         acc-pts   nil)
   (mark:out start)
+  (mark:out "[INFO] UNDO снимет все вставки этого захода разом.")
   (while going
     (setq r (apply modefn (list acc-cells acc-pts)))
     (cond
@@ -5378,6 +5412,8 @@
          (setq ins (append ins one)
                n   (length ins))))
       (t nil)))
+  (mark:fill-pt-undo-end)
+  (setq *error* *mark:pt-olderr*)
   (mark:out (strcat done (itoa n)))
   ins)
 
