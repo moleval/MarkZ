@@ -1,7 +1,7 @@
 ;;;=====================================================================
 ;;;  MARKZ.lsp  —  ЗАПОЛНЕНИЕ АТРИБУТОВ МАРКИ ЗАПОЛНЕНИЙ
 ;;;  Файл: D:\MARKZ.lsp
-;;;  Команды: МАРКА, МАРКИРОВКА, МАРКАРЯД, МАРКАТАБЛ, МАРКАБЛОК
+;;;  Команды: МАРКА, МАРКАРОВКА, МАРКАРЯД, МАРКАТАБЛ, МАРКАБЛОК
 ;;;
 ;;;  Режим самодиагностики TEST 00 ... TEST 14.
 ;;;  TEST 00 — прогон скобок исходника MARKZ.lsp.
@@ -10,7 +10,7 @@
 ;;;
 ;;;  Загрузка:
 ;;;    (load "D:/MARKZ.lsp")
-;;;    МАРКИРОВКА
+;;;    МАРКАРОВКА
 ;;;
 ;;;  ВАЖНО: имена блоков, атрибутов и Dynamic Properties должны
 ;;;  точно совпадать с чертежом. Если Visibility называется иначе —
@@ -82,7 +82,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 25")
+(setq *mark:rev*    "Ред. 26")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -824,7 +824,7 @@
     (progn
       (mark:out "[TEST 01] Блоки \"Заполнение в витраж\" — ERROR")
       (mark:out "Блоки заполнений не обнаружены.")
-      (mark:out "[INFO] МАРКИРОВКА пишет марку только в «Заполнение в витраж».")
+      (mark:out "[INFO] МАРКАРОВКА пишет марку только в «Заполнение в витраж».")
       (mark:out "[INFO] Стойки и линии сетки эта команда не маркирует.")
       (mark:out "[INFO] Сетка без заполнений — команда МАРКА, источник Сетка.")
       (mark:out "[INFO] Имена, найденные в выделении:")
@@ -1837,7 +1837,7 @@
 
 (defun mark:main (/ r)
   (mark:cmd-line
-    "МАРКИРОВКА — марки блоков в «Заполнение в витраж».")
+    "МАРКАРОВКА — марки блоков в «Заполнение в витраж».")
   (mark:reset-state)
   (mark:banner)
 
@@ -2626,7 +2626,7 @@
 ;;;=====================================================================
 ;;;  MARKAR — рядовка условных обозначений (Ряд заполнений)
 ;;;  Команда: МАРКАРЯД
-;;;  После МАРКИРОВКА: индекс от размера (буква = высота, номер = ширина).
+;;;  После МАРКАРОВКА: индекс от размера (буква = высота, номер = ширина).
 ;;;  Старые «Ряд заполнений» этой зоны удаляются и ставятся заново.
 ;;;  Горизонталь: номера 1,2,3… снизу на min(y0)-1000, соосно по X.
 ;;;  Вертикаль: буквы А,Б,В… справа на max(x1)+1000.
@@ -2707,7 +2707,7 @@
 
 (defun mark:ar-collect (fills / out e obj w h wh hh ins mres mval pa
                              x0 y0 x1 y1 cx cy)
-  ;; 1) сбор: геометрия + W/H теми же ключами, что в МАРКИРОВКА;
+  ;; 1) сбор: геометрия + W/H теми же ключами, что в МАРКАРОВКА;
   ;;    разбор Марки — только подсказка, не фильтр
   (setq out nil)
   (foreach e fills
@@ -2760,7 +2760,7 @@
                        (float w) (float h))
                  out))))))
   (setq out (reverse out))
-  ;; 2) один знаменатель: индекс ТОЛЬКО от W/H — как МАРКИРОВКА
+  ;; 2) один знаменатель: индекс ТОЛЬКО от W/H — как МАРКАРОВКА
   (mark:ar-reindex out))
 
 ;; Переназначение: буква = индекс высоты, номер = индекс ширины + 1
@@ -3755,8 +3755,220 @@
           (mark:round1 top))
     nil))
 
+
+;;; ---- каркас из блока под точкой (динамический блок тоже) ------------
+;; ssget не видит линии внутри INSERT. Сетка по выбранным MLINE/LINE не трогается.
+;; Матрица (a b c d e f): x' = a*x + b*y + c, y' = d*x + e*y + f.
+
+(defun mark:fill-mat-mul (p c / pa pb pc pd pe pf ca cb cc cd ce cf)
+  (setq pa (nth 0 p) pb (nth 1 p) pc (nth 2 p)
+        pd (nth 3 p) pe (nth 4 p) pf (nth 5 p)
+        ca (nth 0 c) cb (nth 1 c) cc (nth 2 c)
+        cd (nth 3 c) ce (nth 4 c) cf (nth 5 c))
+  (list (+ (* pa ca) (* pb cd))
+        (+ (* pa cb) (* pb ce))
+        (+ (* pa cc) (* pb cf) pc)
+        (+ (* pd ca) (* pe cd))
+        (+ (* pd cb) (* pe ce))
+        (+ (* pd cf) (* pe cf) pf)))
+
+(defun mark:fill-mat-of (ed / p sx sy rot cs sn)
+  (setq p   (cdr (assoc 10 ed))
+        sx  (cdr (assoc 41 ed))
+        sy  (cdr (assoc 42 ed))
+        rot (cdr (assoc 50 ed)))
+  (if (or (null sx) (not (numberp sx))) (setq sx 1.0))
+  (if (or (null sy) (not (numberp sy))) (setq sy 1.0))
+  (if (or (null rot) (not (numberp rot))) (setq rot 0.0))
+  (if (null p) (setq p (list 0.0 0.0 0.0)))
+  (setq cs (cos rot)
+        sn (sin rot))
+  (list (* sx cs) (* -1.0 sy sn) (float (car p))
+        (* sx sn) (* sy cs)       (float (cadr p))))
+
+(defun mark:fill-mat-pt (m pt / x y)
+  (setq x (float (car pt))
+        y (float (cadr pt)))
+  (list (+ (* (nth 0 m) x) (* (nth 1 m) y) (nth 2 m))
+        (+ (* (nth 3 m) x) (* (nth 4 m) y) (nth 5 m))))
+
+(defun mark:fill-mat-scale (m / sx sy)
+  (setq sx (sqrt (+ (* (nth 0 m) (nth 0 m)) (* (nth 3 m) (nth 3 m))))
+        sy (sqrt (+ (* (nth 1 m) (nth 1 m)) (* (nth 4 m) (nth 4 m)))))
+  (max sx sy 0.001))
+
+(defun mark:fill-segs-xform (segs m / out s p0 p1 sc hw)
+  (setq out nil
+        sc  (mark:fill-mat-scale m))
+  (foreach s segs
+    (setq p0 (mark:fill-mat-pt m (list (nth 0 s) (nth 1 s)))
+          p1 (mark:fill-mat-pt m (list (nth 2 s) (nth 3 s)))
+          hw (if (and (> (length s) 4) (numberp (nth 4 s)))
+               (* (float (nth 4 s)) sc)
+               nil))
+    (setq out
+      (cons (if hw
+              (list (car p0) (cadr p0) (car p1) (cadr p1) hw)
+              (list (car p0) (cadr p0) (car p1) (cadr p1)))
+            out)))
+  (reverse out))
+
+(defun mark:fill-arc-segs (ed / cen rad a0 a1 n i ang verts)
+  (setq cen (cdr (assoc 10 ed))
+        rad (cdr (assoc 40 ed))
+        a0  (cdr (assoc 50 ed))
+        a1  (cdr (assoc 51 ed)))
+  (if (and cen rad a0 a1)
+    (progn
+      (if (< a1 a0)
+        (setq a1 (+ a1 (* 2.0 pi))))
+      (setq n 8
+            i 0
+            verts nil)
+      (while (<= i n)
+        (setq ang (+ a0 (* (/ (- a1 a0) (float n)) i))
+              verts (cons (list (+ (float (car cen)) (* (float rad) (cos ang)))
+                                (+ (float (cadr cen)) (* (float rad) (sin ang))))
+                          verts)
+              i (1+ i)))
+      (mark:fill-verts-to-segs (reverse verts) nil))
+    nil))
+
+(defun mark:fill-poly-local (e / ed p rad verts closed)
+  (setq ed (entget e)
+        verts nil
+        closed nil
+        p (entnext e))
+  (if (and ed (cdr (assoc 70 ed)) (= 1 (logand 1 (cdr (assoc 70 ed)))))
+    (setq closed t))
+  (while (and p (setq rad (entget p)) (/= "SEQEND" (cdr (assoc 0 rad))))
+    (if (and (= "VERTEX" (cdr (assoc 0 rad))) (assoc 10 rad))
+      (setq verts (cons (list (float (car (cdr (assoc 10 rad))))
+                              (float (cadr (cdr (assoc 10 rad)))))
+                        verts)))
+    (setq p (entnext p)))
+  (setq verts (reverse verts))
+  (if (>= (length verts) 2)
+    (mark:fill-verts-to-segs verts closed)
+    nil))
+
+;; Отрезки в системе блока. LINE/ARC читаем сами: extract-segs для LINE
+;; берёт cadr после cdr и для сетки чертежа его не меняем.
+(defun mark:fill-local-segs (e typ ed / p q)
+  (cond
+    ((= typ "LINE")
+     (setq p (cdr (assoc 10 ed))
+           q (cdr (assoc 11 ed)))
+     (if (and p q)
+       (list (list (float (car p)) (float (cadr p))
+                   (float (car q)) (float (cadr q))))
+       nil))
+    ((= typ "ARC")
+     (mark:fill-arc-segs ed))
+    ((= typ "POLYLINE")
+     (mark:fill-poly-local e))
+    (t
+     (mark:fill-extract-segs e))))
+
+(defun mark:fill-skip-block? (nm)
+  (and (mark:strp nm)
+       (or (mark:name= nm *mark:block-fill*)
+           (mark:name= nm *mark:block-glazing*)
+           (mark:name= nm *mark:ar-block*))))
+
+(defun mark:fill-eff-name (e / obj nm)
+  (setq obj (mark:vla e)
+        nm  (if obj (mark:ax-get obj "EffectiveName") nil))
+  (if (mark:strp nm)
+    nm
+    (cdr (assoc 2 (entget e)))))
+
+(defun mark:fill-def-segs (bname mat depth / rec e ed typ segs sub nm m2)
+  (if (or (not (mark:strp bname)) (= bname "") (>= depth 6))
+    nil
+    (progn
+      (setq rec (tblsearch "BLOCK" bname)
+            e   (if rec (cdr (assoc -2 rec)) nil)
+            segs nil)
+      (while (and e (setq ed (entget e)) (/= "ENDBLK" (cdr (assoc 0 ed))))
+        (setq typ (cdr (assoc 0 ed)))
+        (cond
+          ((= typ "INSERT")
+           (setq nm  (cdr (assoc 2 ed))
+                 m2  (mark:fill-mat-mul mat (mark:fill-mat-of ed))
+                 sub (if (mark:fill-skip-block? nm)
+                       nil
+                       (mark:fill-def-segs nm m2 (1+ depth)))
+                 segs (append sub segs)))
+          ((member typ '("LINE" "ARC" "LWPOLYLINE" "POLYLINE" "MLINE"))
+           (setq sub (mark:fill-local-segs e typ ed)
+                 segs (append (mark:fill-segs-xform sub mat) segs))))
+        (setq e (entnext e)))
+      segs)))
+
+(defun mark:fill-inserts-at (pt / ss i e bb x y best besta a nm)
+  (setq x (float (car pt))
+        y (float (cadr pt))
+        ss (vl-catch-all-apply 'ssget
+             (list "X" (list (cons 0 "INSERT"))))
+        best nil
+        besta nil)
+  (if (and ss (not (vl-catch-all-error-p ss)))
+    (progn
+      (setq i (sslength ss))
+      (repeat i
+        (setq i (1- i)
+              e (ssname ss i)
+              nm (mark:fill-eff-name e))
+        (if (not (mark:fill-skip-block? nm))
+          (progn
+            (setq bb (mark:cell-bb e))
+            (if (and bb
+                     (>= x (nth 0 bb)) (<= x (nth 2 bb))
+                     (>= y (nth 1 bb)) (<= y (nth 3 bb))
+                     (> (- (nth 2 bb) (nth 0 bb)) 1.0)
+                     (> (- (nth 3 bb) (nth 1 bb)) 1.0))
+              (progn
+                (setq a (* (- (nth 2 bb) (nth 0 bb))
+                           (- (nth 3 bb) (nth 1 bb))))
+                (if (or (null besta) (< a besta))
+                  (setq besta a
+                        best  e)))))))))
+  best)
+
+(defun mark:fill-block-segs-at (pt / e ed nm mat segs)
+  (setq e (mark:fill-inserts-at pt))
+  (if (null e)
+    nil
+    (progn
+      (setq ed   (entget e)
+            nm   (cdr (assoc 2 ed))
+            mat  (mark:fill-mat-of ed)
+            segs (mark:fill-def-segs nm mat 0))
+      (mark:out
+        (strcat "[INFO] Блок под точкой: «" (mark:fill-eff-name e)
+                "», отрезков " (itoa (length segs))))
+      segs)))
+
+(defun mark:fill-try-segs (segs pt cells pts / bb r)
+  (setq bb (mark:fill-cell-by-rays segs pt))
+  (if bb
+    (progn
+      (mark:out "[INFO] Внутренний контур ячейки найден лучами.")
+      (mark:fill-add cells pts bb))
+    (progn
+      (setq r  (mark:fill-segs->cells segs)
+            bb (mark:fill-smallest-cell (car r) pt))
+      (mark:out
+        (strcat "[INFO] Сетка блока: осей X " (itoa (cadr r))
+                " Y " (itoa (caddr r))
+                "  ячеек " (itoa (length (car r)))))
+      (if bb
+        (mark:fill-add cells pts bb)
+        nil))))
+
 (defun mark:fill-mode-point (cells pts / pt ss i e verts bb
-                                 best best-area a r segs win)
+                                 best best-area a r segs win bsegs)
   (setq pt (getpoint "\nТочка внутри ячейки <Enter — конец>: "))
   (if (null pt)
     (progn
@@ -3795,6 +4007,17 @@
               (mark:out "[WARN] Габарит ячейки не взят.")
               (list cells pts))))
         (progn
+          (setq bsegs (mark:fill-block-segs-at pt)
+                r nil)
+          (if (and bsegs (>= (length bsegs) 4))
+            (progn
+              (setq r (mark:fill-try-segs bsegs pt cells pts))
+              (if r
+                r
+                (progn
+                  (mark:out "[INFO] В блоке ячейка под точкой не собрана.")
+                  (list cells pts))))
+            (progn
           (mark:out "[INFO] Замкнутой полилинии нет — ищем по сетке линий…")
           (setq win (if (and (numberp *mark:fill-window*)
                              (> *mark:fill-window* 0.0))
@@ -3841,7 +4064,7 @@
                           (setq r    (mark:fill-add cells pts bb)
                                 cells (car r)
                                 pts   (cadr r))
-                          (list cells pts))))))))))))))
+                          (list cells pts))))))))))))))))
 
 (defun mark:fill-segs->cells (segs / xs ys sx sy x0 x1 y0 y1
                                   ix iy nxs nys out ax tmp v
@@ -4438,7 +4661,7 @@
   (setq *mark:batch-undo* t)
   (if (eq mode "grid")
     (progn
-      ;; ВАРИАНТ 1: ПО СЕТКЕ (полный цикл: МАРКАБЛОК -> МАРКИРОВКА -> МАРКАРЯД -> МАРКАТАБЛ)
+      ;; ВАРИАНТ 1: ПО СЕТКЕ (полный цикл: МАРКАБЛОК -> МАРКАРОВКА -> МАРКАРЯД -> МАРКАТАБЛ)
       (mark:out "[ЭТАП 1/4] МАРКАБЛОК — раскладка заполнений по сетке витража...")
       (setq r (mark:fill-mode-grid nil nil)
             cells (car r)
@@ -4452,8 +4675,8 @@
               (setq *mark:fills* new-fills
                     *mark:reuse-sel* t
                     *mark:sel-total* (length new-fills))
-              ;; МАРКИРОВКА
-              (mark:out "[ЭТАП 2/4] МАРКИРОВКА — маркировка заполнений...")
+              ;; МАРКАРОВКА
+              (mark:out "[ЭТАП 2/4] МАРКАРОВКА — маркировка заполнений...")
               (mark:main)
               ;; МАРКАРЯД
               (mark:out "[ЭТАП 3/4] МАРКАРЯД — расстановка рядовки...")
@@ -4462,8 +4685,8 @@
               (mark:out "[ЭТАП 4/4] МАРКАТАБЛ — ведомость заполнения...")
               (mtab:main))))))
     (progn
-      ;; ВАРИАНТ 2: ИЗ ГОТОВЫХ БЛОКОВ (МАРКИРОВКА -> МАРКАРЯД -> МАРКАТАБЛ)
-      (mark:out "[ЭТАП 1/3] МАРКИРОВКА — маркировка готовых блоков...")
+      ;; ВАРИАНТ 2: ИЗ ГОТОВЫХ БЛОКОВ (МАРКАРОВКА -> МАРКАРЯД -> МАРКАТАБЛ)
+      (mark:out "[ЭТАП 1/3] МАРКАРОВКА — маркировка готовых блоков...")
       (setq *mark:reuse-sel* nil)
       (mark:main)
       (if *mark:fills*
@@ -4479,7 +4702,7 @@
   (setq *mark:reuse-sel*  nil
         *mark:batch-undo* nil)
   (princ))
-(defun c:МАРКИРОВКА () (mark:main))
+(defun c:МАРКАРОВКА () (mark:main))
 (defun c:MARKZ () (mark:main))
 (defun c:МАРКАРЯД () (mark:ar-main))
 (defun c:MARKAR () (mark:ar-main))
@@ -4489,6 +4712,7 @@
 (defun c:MARKFILL () (mark:fill-main))
 
 ;; Снять старые имена из памяти AutoCAD при повторной загрузке
+(setq c:МАРКИРОВКА nil)
 (setq c:МАРКАЗ nil)
 (setq c:МАРКАР nil)
 (setq c:МАРКАЗАЛ nil)
@@ -4542,7 +4766,7 @@
 (princ (strcat
   "\n[MARKZ] Загружен " *mark:rev*
   "\nМАРКА       — полный цикл: сетка или готовые заполнения"
-  "\nМАРКИРОВКА  — марки блоков в «Заполнение в витраж»"
+  "\nМАРКАРОВКА  — марки блоков в «Заполнение в витраж»"
   "\nМАРКАРЯД    — рядовка из блоков «Ряд заполнений»: номера снизу, буквы справа"
   "\nМАРКАТАБЛ   — ведомость"
   "\nМАРКАБЛОК   — вставка заполнений; Точка — пока не Enter\n"))
