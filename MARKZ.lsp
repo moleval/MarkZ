@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 42")
+(setq *mark:rev*    "Ред. 43")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -115,6 +115,9 @@
 (setq *mark:no-expl-undo* nil)
 (setq *mark:expl-n* 0)
 (setq *mark:def-n* 0)
+(setq *mark:vis-n* 0)
+(setq *mark:hid-n* 0)
+(setq *mark:vis-open* 0)
 
 (defun mark:reset-state ()
   (setq *mark:dyn-cache*    nil
@@ -4967,9 +4970,14 @@
         *mark:line-vis* 0
         *mark:expl-n* 0
         *mark:def-n* 0
+        *mark:vis-n* 0
+        *mark:hid-n* 0
+        *mark:vis-open* 0
         *mark:copy-left* 0
         *mark:dyn-quiet* t
         *mark:no-expl-undo* t)
+  (if (> n 0)
+    (mark:out (strcat "[INFO] Текущая видимость, блоков " (itoa n) "…")))
   (foreach hit hits
     (setq i (1+ i)
           ed (entget (cadr hit))
@@ -5005,12 +5013,22 @@
   (setq *mark:dyn-quiet* nil
         *mark:no-expl-undo* nil)
   (if (or (and (numberp *mark:expl-n*) (> *mark:expl-n* 0))
-          (and (numberp *mark:def-n*) (> *mark:def-n* 0)))
+          (and (numberp *mark:def-n*) (> *mark:def-n* 0))
+          (and (numberp *mark:vis-n*) (> *mark:vis-n* 0)))
     (mark:out
-      (strcat "[INFO] Геометрия: из определения "
-              (itoa (if (numberp *mark:def-n*) *mark:def-n* 0))
+      (strcat "[INFO] Геометрия: текущая видимость "
+              (itoa (if (numberp *mark:vis-n*) *mark:vis-n* 0))
               ", разборка "
-              (itoa (if (numberp *mark:expl-n*) *mark:expl-n* 0)))))
+              (itoa (if (numberp *mark:expl-n*) *mark:expl-n* 0))
+              (if (and (numberp *mark:def-n*) (> *mark:def-n* 0))
+                (strcat ", мультилиния " (itoa *mark:def-n*))
+                "")
+              (if (and (numberp *mark:hid-n*) (> *mark:hid-n* 0))
+                (strcat ", скрыто " (itoa *mark:hid-n*))
+                "")
+              (if (and (numberp *mark:vis-open*) (> *mark:vis-open* 0))
+                ", фильтр пуст"
+                ""))))
   (if (and (numberp *mark:copy-left*) (> *mark:copy-left* 0))
     (mark:out
       (strcat "[WARN] Не удалены копии блоков: " (itoa *mark:copy-left*))))
@@ -5256,40 +5274,146 @@
           (mark:out (strcat "[WARN] Это не блок (" typ "). Нужна линия каркаса."))
           nil)))))
 
-(defun mark:fill-exploded-segs (lst depth / segs ent en ed typ sub)
-  (setq segs nil)
+(defun mark:fill-shown? (ent / obj en ed v)
+  ;; DXF 60 и Visible. Чужое состояние видимости в разборке невидимо.
+  (setq obj (if (= (type ent) 'VLA-OBJECT) ent (mark:ax-catch-vla ent))
+        en  (cond
+              ((= (type ent) 'ENAME) ent)
+              (obj (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+              (t nil))
+        ed  (if (and en (not (vl-catch-all-error-p en))) (entget en) nil))
+  (if (and ed (= 1 (cdr (assoc 60 ed))))
+    nil
+    (progn
+      (setq v (if obj (vl-catch-all-apply 'vla-get-Visible (list obj)) nil))
+      (not (or (eq v :vlax-false) (eq v 0))))))
+
+(defun mark:fill-as-list (x / r)
+  (cond
+    ((listp x) x)
+    ((= (type x) 'VARIANT)
+     (setq r (vl-catch-all-apply 'vlax-safearray->list
+               (list (vlax-variant-value x))))
+     (if (or (vl-catch-all-error-p r) (not (listp r))) nil r))
+    (t nil)))
+
+(defun mark:fill-shift-segs (segs dx dy / s hw out)
+  (setq out nil)
+  (foreach s segs
+    (setq hw (if (and (> (length s) 4) (numberp (nth 4 s))) (nth 4 s) 0.0)
+          out (cons (list (- (float (nth 0 s)) dx)
+                          (- (float (nth 1 s)) dy)
+                          (- (float (nth 2 s)) dx)
+                          (- (float (nth 3 s)) dy)
+                          hw)
+                    out)))
+  (reverse out))
+
+(defun mark:fill-ins-pt (obj / p)
+  (setq p (vl-catch-all-apply 'vlax-get (list obj 'InsertionPoint)))
+  (cond
+    ((or (null p) (vl-catch-all-error-p p)) nil)
+    ((= (type p) 'VARIANT)
+     (vl-catch-all-apply 'vlax-safearray->list (list (vlax-variant-value p))))
+    ((listp p) p)
+    (t nil)))
+
+(defun mark:fill-sweep-far (x y / ss i e echo n)
+  ;; Окно далеко от каркаса. Оригиналы сюда не попадают.
+  (setq echo (getvar "CMDECHO")
+        n 0)
+  (setvar "CMDECHO" 0)
+  (setq ss (vl-catch-all-apply 'ssget
+             (list "_C"
+                   (list (- x 200000.0) (- y 200000.0) 0.0)
+                   (list (+ x 200000.0) (+ y 200000.0) 0.0))))
+  (setvar "CMDECHO" echo)
+  (if (and ss (not (vl-catch-all-error-p ss)))
+    (progn
+      (setq i (sslength ss))
+      (repeat i
+        (setq i (1- i)
+              e (ssname ss i))
+        (if (and e (entget e))
+          (progn
+            (mark:fill-erase (mark:ax-catch-vla e))
+            (if (not (entget e))
+              (setq n (1+ n))))))))
+  n)
+
+(defun mark:fill-exploded-segs (lst depth force-hid / segs hid ent en ed typ sub
+                                     piece shown pair)
+  ;; (видимые . скрытые). Скрытые — другие состояния видимости.
+  (setq segs nil
+        hid nil)
   (if (and lst (listp lst) (< depth 3))
     (foreach ent lst
       (if ent
         (progn
           (setq en (vl-catch-all-apply 'vlax-vla-object->ename (list ent))
                 ed (if (and en (not (vl-catch-all-error-p en))) (entget en) nil)
-                typ (if ed (cdr (assoc 0 ed)) nil))
+                typ (if ed (cdr (assoc 0 ed)) nil)
+                shown (and (not force-hid) (mark:fill-shown? ent))
+                piece nil)
           (cond
             ((member typ '("LINE" "ARC" "LWPOLYLINE" "POLYLINE" "MLINE"))
-             (setq segs (append segs (mark:fill-local-segs en typ ed))))
+             (setq piece (mark:fill-local-segs en typ ed))
+             (if shown
+               (setq segs (append segs piece))
+               (progn
+                 (if piece
+                   (setq *mark:hid-n*
+                     (1+ (if (numberp *mark:hid-n*) *mark:hid-n* 0))))
+                 (setq hid (append hid piece)))))
             ((and (= typ "INSERT") (< depth 2))
-             (setq sub (vl-catch-all-apply 'vlax-invoke (list ent "Explode")))
-             (if (and (not (vl-catch-all-error-p sub)) (listp sub))
-               (setq segs (append segs (mark:fill-exploded-segs sub (1+ depth)))))))
+             (setq sub (mark:fill-as-list
+                         (vl-catch-all-apply 'vlax-invoke (list ent "Explode"))))
+             (if (listp sub)
+               (progn
+                 (setq pair (mark:fill-exploded-segs sub (1+ depth) (not shown)))
+                 (if shown
+                   (setq segs (append segs (car pair))
+                         hid (append hid (cdr pair)))
+                   (setq hid (append hid (car pair) (cdr pair))))))))
           (mark:fill-erase ent)))))
-  segs)
+  (cons segs hid))
 
-(defun mark:fill-erase (obj / en)
+
+(defun mark:fill-erase (obj / en lay doc layers lk)
   (if obj
     (progn
       (setq en (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
       (vl-catch-all-apply 'vla-Delete (list obj))
       (if (and en (not (vl-catch-all-error-p en)) (entget en))
         (vl-catch-all-apply 'entdel (list en)))
+      ;; Закрытый слой не отдаёт entdel. Открыть, стереть, закрыть обратно.
+      (if (and en (not (vl-catch-all-error-p en)) (entget en))
+        (progn
+          (setq lay (cdr (assoc 8 (entget en)))
+                doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
+                layers (if doc (mark:ax-get doc "Layers") nil)
+                lk (if (and layers lay)
+                     (vl-catch-all-apply 'vla-Item (list layers lay))
+                     nil))
+          (if (and lk (not (vl-catch-all-error-p lk)))
+            (progn
+              (vl-catch-all-apply 'vla-put-Lock (list lk :vlax-false))
+              (vl-catch-all-apply 'entdel (list en))
+              (vl-catch-all-apply 'vla-put-Lock (list lk :vlax-true))))))
       (if (and en (not (vl-catch-all-error-p en)) (entget en))
         (setq *mark:copy-left*
           (1+ (if (numberp *mark:copy-left*) *mark:copy-left* 0)))))))
 
-(defun mark:fill-explode-segs (e / doc obj copy lst segs)
+
+(defun mark:fill-explode-segs (e / doc obj copy lst segs p0 dx dy moved fx fy pair)
+  ;; Копия в стороне и невидима: на каркасе её нет, даже если стирание сорвётся.
+  ;; Разборка даёт текущую видимость, не габарит всех состояний.
   (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
         obj (mark:ax-catch-vla e)
-        segs nil)
+        segs nil
+        dx 10000000.0
+        dy 10000000.0
+        moved nil)
   (if (or (null doc) (null obj))
     nil
     (progn
@@ -5299,15 +5423,41 @@
       (if (or (vl-catch-all-error-p copy) (null copy))
         (setq segs nil)
         (progn
-          (setq lst (vl-catch-all-apply 'vlax-invoke (list copy "Explode")))
-          (if (and (not (vl-catch-all-error-p lst)) (listp lst))
-            (setq segs (mark:fill-exploded-segs lst 0))
+          (setq p0 (mark:fill-ins-pt copy))
+          (if (and p0 (listp p0))
+            (progn
+              (setq fx (+ (float (car p0)) dx)
+                    fy (+ (float (cadr p0)) dy)
+                    moved (not (vl-catch-all-error-p
+                                 (vl-catch-all-apply 'vla-Move
+                                   (list copy
+                                         (vlax-3d-point (float (car p0))
+                                                        (float (cadr p0))
+                                                        0.0)
+                                         (vlax-3d-point fx fy 0.0))))))))
+          (setq lst (mark:fill-as-list
+                      (vl-catch-all-apply 'vlax-invoke (list copy "Explode"))))
+          (if (listp lst)
+            (progn
+              (setq pair (mark:fill-exploded-segs lst 0 nil)
+                    segs (if (car pair)
+                           (car pair)
+                           (progn
+                             (if (cdr pair)
+                               (setq *mark:vis-open*
+                                 (1+ (if (numberp *mark:vis-open*) *mark:vis-open* 0))))
+                             (cdr pair)))))
             (setq segs nil))
-          ;; Explode динблока часто не съедает копию. Иначе она остаётся под оригиналом.
-          (mark:fill-erase copy)))
+          (if moved
+            (setq segs (mark:fill-shift-segs segs dx dy)))
+          (vl-catch-all-apply 'vla-put-Visible (list copy :vlax-false))
+          (mark:fill-erase copy)
+          (if (and moved fx fy)
+            (mark:fill-sweep-far fx fy))))
       (if (and (null *mark:pt-undo*) (null *mark:no-expl-undo*))
         (mark:ax-invoke-ok doc "EndUndoMark" nil))
       segs)))
+
 
 (defun mark:fill-def-has-mline (bname depth / rec e ed typ nm hit)
   (if (or (not (mark:strp bname)) (= bname "") (>= depth 4))
@@ -5339,8 +5489,9 @@
   (reverse out))
 
 (defun mark:fill-segs-of-ins (e / pair ed nm mat segs)
-  ;; Мультилиния — как раньше, из определения, с полушириной.
-  ;; Линии динблока — только текущая видимость, без отступа 25 мм.
+  ;; Мультилиния — из определения, с полушириной.
+  ;; Линии динблока — только текущая видимость. Полное определение
+  ;; содержит все состояния: это максимальный габарит, его не берём.
   (setq pair (assoc e *mark:seg-cache*))
   (if pair
     (cdr pair)
@@ -5349,28 +5500,26 @@
             nm  (if ed (cdr (assoc 2 ed)) nil)
             mat (if ed (mark:fill-mat-of ed) nil))
       (if (mark:fill-mline-p nm)
-        (setq segs (if mat (mark:fill-def-segs nm mat 0) nil))
+        (setq segs (if mat (mark:fill-def-segs nm mat 0) nil)
+              *mark:def-n* (1+ (if (numberp *mark:def-n*) *mark:def-n* 0)))
         (progn
-          (if (and nm mat (= "*" (substr nm 1 1)))
-            (setq segs (mark:fill-segs-xform (mark:fill-bname-local nm) mat)))
-          (if (or (null segs) (< (length segs) 2))
-            (progn
-              (setq segs (mark:fill-lines-hw0 (mark:fill-explode-segs e))
-                    *mark:expl-n* (1+ (if (numberp *mark:expl-n*) *mark:expl-n* 0)))
-              (if (and (or (null segs) (< (length segs) 2)) nm mat)
-                (setq segs (mark:fill-lines-hw0 (mark:fill-def-segs nm mat 0)))))
-            (setq *mark:def-n* (1+ (if (numberp *mark:def-n*) *mark:def-n* 0))))
-          (if (and (null *mark:dyn-quiet*) (or (null segs) (< (length segs) 2)))
-            (mark:out "[WARN] Видимый каркас не прочитан — линии из определения, отступ 0."))))
+          (setq segs (mark:fill-lines-hw0 (mark:fill-explode-segs e)))
+          (if (>= (length segs) 2)
+            (setq *mark:expl-n* (1+ (if (numberp *mark:expl-n*) *mark:expl-n* 0))
+                  *mark:vis-n* (1+ (if (numberp *mark:vis-n*) *mark:vis-n* 0)))
+            (setq segs nil))
+          (if (and (null *mark:dyn-quiet*) (null segs))
+            (mark:out "[WARN] Текущая видимость не прочитана. Габарит всех состояний не беру."))))
       (if (null *mark:dyn-quiet*)
         (mark:out
           (strcat "[INFO] Блок «" (mark:fill-eff-name e)
                   "»: отрезков " (itoa (length segs))
                   (if (and nm (mark:fill-def-has-mline nm 0))
                     ""
-                    ", видимые линии, отступ 0"))))
+                    ", текущая видимость, отступ 0"))))
       (setq *mark:seg-cache* (cons (cons e segs) *mark:seg-cache*))
       segs)))
+
 
 (defun mark:fill-try-rays (segs pt cells pts / bb)
   (setq bb (mark:fill-cell-by-rays segs pt))
