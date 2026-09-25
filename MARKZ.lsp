@@ -102,7 +102,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 33")
+(setq *mark:rev*    "Ред. 34")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3489,7 +3489,28 @@
     0))
 
 ;;; ---- вставка + W/H ----------------------------------------------------
-(defun mark:fill-insert (space x y / obj)
+(defun mark:fill-insert-ent (x y / r e)
+  (setq r (vl-catch-all-apply 'entmake
+            (list (list '(0 . "INSERT")
+                        (cons 2 *mark:block-fill*)
+                        (list 10 (float x) (float y) 0.0)
+                        '(41 . 1.0)
+                        '(42 . 1.0)
+                        '(43 . 1.0)
+                        '(50 . 0.0)))))
+  (if (or (vl-catch-all-error-p r) (null r))
+    nil
+    (progn
+      (setq e (if (and (listp r) (assoc -1 r))
+                (cdr (assoc -1 r))
+                (entlast)))
+      (if e
+        (progn
+          (mark:out "[INFO] Вставка через entmake.")
+          (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+        nil))))
+
+(defun mark:fill-insert (space x y / obj alt)
   (setq obj
     (vl-catch-all-apply 'vla-InsertBlock
       (list space
@@ -3497,19 +3518,19 @@
             *mark:block-fill*
             1.0 1.0 1.0
             0.0)))
+  (if (or (vl-catch-all-error-p obj) (null obj))
+    (setq alt (mark:fill-insert-ent x y)
+          obj (if (or (null alt) (vl-catch-all-error-p alt)) nil alt)))
   (cond
-    ((vl-catch-all-error-p obj)
+    ((and obj (not (vl-catch-all-error-p obj))) obj)
+    (t
      (progn
        (mark:out (strcat "[ERROR] INSERT: "
-                         (vl-catch-all-error-message obj)))
+                         (if (vl-catch-all-error-p obj)
+                           (vl-catch-all-error-message obj)
+                           "Ошибка файлера или блок недоступен")))
        (mark:note-error)
-       nil))
-    ((null obj)
-     (progn
-       (mark:out "[ERROR] INSERT nil.")
-       (mark:note-error)
-       nil))
-    (t obj)))
+       nil))))
 
 (defun mark:fill-set-dims (obj w h / keysW keysH okw okh)
   (setq keysW (cons *mark:prop-width* *mtab:w-keys*)
@@ -4692,36 +4713,225 @@
       (reverse out))))
 
 
-(defun mark:fill-mode-grid-dyn (cells pts / hits segs r bb mid ray box)
-  (mark:out "Сетка-динамика: выберите стойки и ригели.")
+
+(defun mark:fill-cluster-items (items / sorted out cluster v)
+  (if (null items)
+    nil
+    (progn
+      (setq sorted (vl-sort (append items nil)
+                     '(lambda (a b) (< (car a) (car b))))
+            out nil
+            cluster nil)
+      (foreach v sorted
+        (if (and cluster (> (- (car v) (car (car cluster))) *mark:fill-tol*))
+          (setq out (cons cluster out)
+                cluster (list v))
+          (setq cluster (cons v cluster))))
+      (if cluster (setq out (cons cluster out)))
+      (reverse out))))
+
+(defun mark:fill-inner-edge (items sign / it e best)
+  (setq best nil)
+  (foreach it items
+    (setq e (+ (nth 0 it) (* sign (nth 3 it))))
+    (if (or (null best)
+            (and (> sign 0.0) (> e best))
+            (and (< sign 0.0) (< e best)))
+      (setq best e)))
+  best)
+
+(defun mark:fill-item-spans (items / it out)
+  (setq out nil)
+  (foreach it items
+    (setq out (cons (list (nth 1 it) (nth 2 it)) out)))
+  out)
+
+(defun mark:fill-covers (spans lo hi gap / s merged last a b p0 p1 hit)
+  (setq merged nil
+        hit nil)
+  (if spans
+    (foreach s (vl-sort (append spans nil)
+                 '(lambda (a b) (< (car a) (car b))))
+      (setq p0 (car s)
+            p1 (cadr s))
+      (if (null merged)
+        (setq merged (list (list p0 p1)))
+        (progn
+          (setq last (car merged)
+                a (car last)
+                b (cadr last))
+          (if (<= p0 (+ b gap))
+            (setq merged (cons (list a (if (> p1 b) p1 b)) (cdr merged)))
+            (setq merged (cons (list p0 p1) merged)))))))
+  (foreach s merged
+    (if (and (<= (car s) (+ lo gap))
+             (>= (cadr s) (- hi gap)))
+      (setq hit t)))
+  hit)
+
+(defun mark:fill-owners (items / it o out)
+  (setq out nil)
+  (foreach it items
+    (setq o (nth 4 it))
+    (if (not (member o out))
+      (setq out (cons o out))))
+  out)
+
+(defun mark:fill-owners-differ (a b)
+  (and a b (not (equal a b))))
+
+(defun mark:fill-overlap-owners (items lo hi gap / it o out)
+  (setq out nil)
+  (foreach it items
+    (if (and (<= (nth 1 it) (+ hi gap))
+             (>= (nth 2 it) (- lo gap)))
+      (progn
+        (setq o (nth 4 it))
+        (if (not (member o out))
+          (setq out (cons o out))))))
+  out)
+
+(defun mark:fill-v-split (cols iL iR lo hi gap / i hit)
+  (setq i (1+ iL)
+        hit nil)
+  (while (and (< i iR) (null hit))
+    (if (mark:fill-covers (mark:fill-item-spans (nth i cols)) lo hi gap)
+      (setq hit t))
+    (setq i (1+ i)))
+  hit)
+
+(defun mark:fill-span-items (items lo hi gap / it out)
+  (setq out nil)
+  (foreach it items
+    (if (mark:fill-covers (list (list (nth 1 it) (nth 2 it))) lo hi gap)
+      (setq out (cons it out))))
+  out)
+
+(defun mark:fill-owned-axes (hits / i vs hs part s x0 y0 x1 y1 dx dy ln hw)
+  (setq i 0
+        vs nil
+        hs nil
+        *mark:dyn-quiet* t)
+  (foreach hit hits
+    (setq i (1+ i)
+          part (mark:fill-segs-of-ins (cadr hit)))
+    (foreach s part
+      (setq x0 (min (float (nth 0 s)) (float (nth 2 s)))
+            y0 (min (float (nth 1 s)) (float (nth 3 s)))
+            x1 (max (float (nth 0 s)) (float (nth 2 s)))
+            y1 (max (float (nth 1 s)) (float (nth 3 s)))
+            dx (- x1 x0)
+            dy (- y1 y0)
+            ln (sqrt (+ (* dx dx) (* dy dy))))
+      (if (>= ln 30.0)
+        (progn
+          (setq hw (if (and (> (length s) 4)
+                           (numberp (nth 4 s))
+                           (> (nth 4 s) 0.0))
+                     (float (nth 4 s))
+                     25.0))
+          (cond
+            ((<= dy (* *mark:fill-slope* ln))
+             (setq hs (cons (list (/ (+ (float (nth 1 s)) (float (nth 3 s))) 2.0)
+                                  x0 x1 hw i)
+                            hs)))
+            ((<= dx (* *mark:fill-slope* ln))
+             (setq vs (cons (list (/ (+ (float (nth 0 s)) (float (nth 2 s))) 2.0)
+                                  y0 y1 hw i)
+                            vs))))))))
+  (setq *mark:dyn-quiet* nil)
+  (mark:out
+    (strcat "[INFO] Отрезков каркаса: " (itoa (+ (length vs) (length hs)))
+            "  вертикальных " (itoa (length vs))
+            "  горизонтальных " (itoa (length hs))))
+  (list vs hs))
+
+(defun mark:fill-closed-cells (hits / axes vs hs cols rows iL iR nL nR
+                                     Lcol Rcol xL xR w spanning iB nB
+                                     bot top yB yT h gap boxes
+                                     oL oR n-own n-open)
+  ;; Ячейка только если четыре стороны доходят до углов и
+  ;; противоположные стороны принадлежат разным блокам.
+  (setq axes (mark:fill-owned-axes hits)
+        vs (car axes)
+        hs (cadr axes)
+        cols (mark:fill-cluster-items vs)
+        gap (+ *mark:fill-tol* 25.0)
+        boxes nil
+        n-own 0
+        n-open 0
+        iL 0
+        nL (length cols))
+  (while (< iL nL)
+    (setq iR (1+ iL))
+    (while (< iR nL)
+      (setq Lcol (nth iL cols)
+            Rcol (nth iR cols)
+            oL (mark:fill-owners Lcol)
+            oR (mark:fill-owners Rcol)
+            xL (mark:fill-inner-edge Lcol 1.0)
+            xR (mark:fill-inner-edge Rcol -1.0)
+            w (if (and xL xR) (- xR xL) 0.0))
+      (cond
+        ((not (mark:fill-owners-differ oL oR))
+         (setq n-own (1+ n-own)))
+        ((<= w 50.0) nil)
+        (t
+         (setq spanning (mark:fill-span-items hs xL xR gap)
+               rows (mark:fill-cluster-items spanning)
+               iB 0
+               nB (length rows))
+         (while (< iB (1- nB))
+           (setq bot (nth iB rows)
+                 top (nth (1+ iB) rows)
+                 yB (mark:fill-inner-edge bot 1.0)
+                 yT (mark:fill-inner-edge top -1.0)
+                 h (if (and yB yT) (- yT yB) 0.0))
+           (cond
+             ((not (mark:fill-owners-differ
+                     (mark:fill-owners bot)
+                     (mark:fill-owners top)))
+              (setq n-own (1+ n-own)))
+             ((<= h 50.0) nil)
+             ((not (and (mark:fill-covers (mark:fill-item-spans Lcol) yB yT gap)
+                        (mark:fill-covers (mark:fill-item-spans Rcol) yB yT gap)))
+              (setq n-open (1+ n-open)))
+             ((mark:fill-v-split cols iL iR yB yT gap)
+              (setq n-open (1+ n-open)))
+             ((not (and (mark:fill-owners-differ
+                          (mark:fill-overlap-owners Lcol yB yT gap)
+                          (mark:fill-overlap-owners Rcol yB yT gap))
+                        (mark:fill-owners-differ
+                          (mark:fill-overlap-owners bot xL xR gap)
+                          (mark:fill-overlap-owners top xL xR gap))))
+              (setq n-own (1+ n-own)))
+             (t
+              (setq boxes (cons (list xL yB xR yT) boxes))))
+           (setq iB (1+ iB)))))
+      (setq iR (1+ iR)))
+    (setq iL (1+ iL)))
+  (mark:out
+    (strcat "[INFO] Замкнутых ячеек: " (itoa (length boxes))
+            ". Пропуск: один блок " (itoa n-own)
+            ", неполный контур " (itoa n-open) "."))
+  (if (null boxes)
+    (mark:out "[INFO] Незамкнутый контур и камеры профиля не заполняю."))
+  (reverse boxes))
+
+(defun mark:fill-mode-grid-dyn (cells pts / hits boxes bb r)
+  (mark:out "Сетка-динамика: выберите стойки и ригели. Только замкнутый контур.")
   (setq hits (mark:fill-pick-frame))
   (if (null hits)
     (progn
       (mark:out "[INFO] Выбор отменён.")
       (list cells pts))
     (progn
-      (setq segs (mark:fill-hits-segs hits))
-      (mark:out
-        (strcat "[INFO] Отрезков каркаса: " (itoa (length segs))))
-      (if (< (length segs) 4)
-        (progn
-          (mark:out "[WARN] Мало отрезков в выбранных блоках.")
-          (list cells pts))
-        (progn
-          (setq r (mark:fill-segs->cells segs))
-          (mark:out
-            (strcat "[INFO] Сетка: осей X " (itoa (cadr r))
-                    " Y " (itoa (caddr r))
-                    "  ячеек " (itoa (length (car r)))))
-          (foreach bb (car r)
-            (setq mid (list (/ (+ (nth 0 bb) (nth 2 bb)) 2.0)
-                            (/ (+ (nth 1 bb) (nth 3 bb)) 2.0))
-                  ray (mark:fill-cell-by-rays segs mid)
-                  box (if ray ray bb)
-                  r   (mark:fill-add cells pts box)
-                  cells (car r)
-                  pts   (cadr r)))
-          (list cells pts))))))
+      (setq boxes (mark:fill-closed-cells hits))
+      (foreach bb boxes
+        (setq r (mark:fill-add cells pts bb)
+              cells (car r)
+              pts (cadr r)))
+      (list cells pts))))
 
 (defun mark:fill-mode-grid (cells pts / ss i e r segs total bb typ ed)
   (mark:out "Сетка-мультилинии: выберите мультилинии. Блоки стоек не нужны.")
