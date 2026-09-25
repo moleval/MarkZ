@@ -102,7 +102,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 34")
+(setq *mark:rev*    "Ред. 35")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3489,48 +3489,140 @@
     0))
 
 ;;; ---- вставка + W/H ----------------------------------------------------
-(defun mark:fill-insert-ent (x y / r e)
-  (setq r (vl-catch-all-apply 'entmake
-            (list (list '(0 . "INSERT")
-                        (cons 2 *mark:block-fill*)
-                        (list 10 (float x) (float y) 0.0)
-                        '(41 . 1.0)
-                        '(42 . 1.0)
-                        '(43 . 1.0)
-                        '(50 . 0.0)))))
-  (if (or (vl-catch-all-error-p r) (null r))
+(defun mark:fill-block-there ()
+  (if (tblsearch "BLOCK" *mark:block-fill*)
+    t
+    (progn
+      (if (null *mark:fill-miss*)
+        (progn
+          (setq *mark:fill-miss* t)
+          (mark:out
+            (strcat "[ERROR] В чертеже нет блока «" *mark:block-fill* "»."))))
+      nil)))
+
+(defun mark:fill-attdefs (bname / rec e ed out)
+  (setq rec (tblsearch "BLOCK" bname)
+        e   (if rec (cdr (assoc -2 rec)) nil)
+        out nil)
+  (while (and e (setq ed (entget e)) (/= "ENDBLK" (cdr (assoc 0 ed))))
+    (if (= "ATTDEF" (cdr (assoc 0 ed)))
+      (setq out (cons ed out)))
+    (setq e (entnext e)))
+  (reverse out))
+
+(defun mark:fill-insert-ent (x y / e defs d tag pt h ang flags)
+  (if (null (tblsearch "BLOCK" *mark:block-fill*))
     nil
     (progn
-      (setq e (if (and (listp r) (assoc -1 r))
-                (cdr (assoc -1 r))
-                (entlast)))
-      (if e
+      (setq defs (mark:fill-attdefs *mark:block-fill*)
+            e (vl-catch-all-apply 'entmakex
+                (list (list '(0 . "INSERT")
+                            (cons 2 *mark:block-fill*)
+                            (list 10 (float x) (float y) 0.0)
+                            '(41 . 1.0)
+                            '(42 . 1.0)
+                            '(43 . 1.0)
+                            '(50 . 0.0)
+                            (cons 66 (if defs 1 0))))))
+      (if (or (vl-catch-all-error-p e) (null e))
+        nil
         (progn
-          (mark:out "[INFO] Вставка через entmake.")
-          (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
-        nil))))
+          (if defs
+            (progn
+              (foreach d defs
+                (setq tag (cdr (assoc 2 d))
+                      pt  (cdr (assoc 10 d))
+                      h   (cdr (assoc 40 d))
+                      ang (cdr (assoc 50 d))
+                      flags (cdr (assoc 70 d)))
+                (entmakex
+                  (list '(0 . "ATTRIB")
+                        (list 10
+                              (+ (float x) (if (and pt (car pt)) (float (car pt)) 0.0))
+                              (+ (float y) (if (and pt (cadr pt)) (float (cadr pt)) 0.0))
+                              0.0)
+                        (cons 2 (if tag tag "Марка"))
+                        '(1 . "")
+                        (cons 40 (if (numberp h) h 2.5))
+                        (cons 70 (if (numberp flags) flags 0))
+                        (cons 50 (if (numberp ang) ang 0.0)))))
+              (entmakex '((0 . "SEQEND")))))
+          (mark:out "[INFO] Вставка через entmakex.")
+          (vl-catch-all-apply 'vlax-ename->vla-object (list e)))))))
 
-(defun mark:fill-insert (space x y / obj alt)
-  (setq obj
-    (vl-catch-all-apply 'vla-InsertBlock
-      (list space
-            (vlax-3d-point (list (float x) (float y) 0.0))
-            *mark:block-fill*
-            1.0 1.0 1.0
-            0.0)))
-  (if (or (vl-catch-all-error-p obj) (null obj))
-    (setq alt (mark:fill-insert-ent x y)
-          obj (if (or (null alt) (vl-catch-all-error-p alt)) nil alt)))
+(defun mark:fill-find-fill (/ ss i e nm best)
+  (setq ss (vl-catch-all-apply 'ssget
+             (list "X" (list '(0 . "INSERT"))))
+        best nil)
+  (if (and ss (not (vl-catch-all-error-p ss)))
+    (progn
+      (setq i (sslength ss))
+      (while (and (> i 0) (null best))
+        (setq i (1- i)
+              e (ssname ss i)
+              nm (mark:fill-eff-name e))
+        (if (mark:name= nm *mark:block-fill*)
+          (setq best e)))))
+  best)
+
+(defun mark:fill-insert-copy (x y / src obj copy)
+  (setq src (mark:fill-find-fill)
+        obj (if src (mark:ax-catch-vla src) nil)
+        copy (if obj (vl-catch-all-apply 'vla-Copy (list obj)) nil))
+  (if (or (null copy) (vl-catch-all-error-p copy))
+    nil
+    (progn
+      (vl-catch-all-apply 'vla-Move
+        (list copy
+              (vl-catch-all-apply 'vla-get-InsertionPoint (list copy))
+              (vlax-3d-point (list (float x) (float y) 0.0))))
+      (mark:out "[INFO] Вставка копией блока, который уже есть в чертеже.")
+      copy)))
+
+(defun mark:fill-try-vla (space x y)
+  (vl-catch-all-apply 'vla-InsertBlock
+    (list space
+          (vlax-3d-point (list (float x) (float y) 0.0))
+          *mark:block-fill*
+          1.0 1.0 1.0
+          0.0)))
+
+(defun mark:fill-end-undo (/ doc)
+  (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
+  (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
+  (setq *mark:fill-undo-off* t))
+
+(defun mark:fill-insert (space x y / obj err alt msg)
   (cond
-    ((and obj (not (vl-catch-all-error-p obj))) obj)
+    ((null (mark:fill-block-there)) nil)
     (t
      (progn
-       (mark:out (strcat "[ERROR] INSERT: "
-                         (if (vl-catch-all-error-p obj)
-                           (vl-catch-all-error-message obj)
-                           "Ошибка файлера или блок недоступен")))
-       (mark:note-error)
-       nil))))
+       (setq obj (mark:fill-try-vla space x y)
+             err (if (vl-catch-all-error-p obj)
+                   (vl-catch-all-error-message obj)
+                   nil))
+       (if (and err (null *mark:fill-undo-off*)
+                (wcmatch (strcase err) "*FILER*,*ФАЙЛЕР*"))
+         (progn
+           (mark:out "[INFO] Ошибка файлера внутри UNDO — повторяю вставку без группы.")
+           (mark:fill-end-undo)
+           (setq obj (mark:fill-try-vla space x y)
+                 err (if (vl-catch-all-error-p obj)
+                       (vl-catch-all-error-message obj)
+                       nil))))
+       (if (or err (null obj))
+         (setq alt (mark:fill-insert-copy x y)
+               obj (if (and alt (not (vl-catch-all-error-p alt))) alt obj)))
+       (if (or (null obj) (vl-catch-all-error-p obj))
+         (setq alt (mark:fill-insert-ent x y)
+               obj (if (and alt (not (vl-catch-all-error-p alt))) alt nil)))
+       (if (and obj (not (vl-catch-all-error-p obj)))
+         obj
+         (progn
+           (setq msg (if err err "блок не вставился"))
+           (mark:out (strcat "[ERROR] INSERT: " msg))
+           (mark:note-error)
+           nil))))))
 
 (defun mark:fill-set-dims (obj w h / keysW keysH okw okh)
   (setq keysW (cons *mark:prop-width* *mtab:w-keys*)
@@ -4811,6 +4903,7 @@
   (setq i 0
         vs nil
         hs nil
+        *mark:line-vis* 0
         *mark:dyn-quiet* t)
   (foreach hit hits
     (setq i (1+ i)
@@ -4825,9 +4918,7 @@
             ln (sqrt (+ (* dx dx) (* dy dy))))
       (if (>= ln 30.0)
         (progn
-          (setq hw (if (and (> (length s) 4)
-                           (numberp (nth 4 s))
-                           (> (nth 4 s) 0.0))
+          (setq hw (if (and (> (length s) 4) (numberp (nth 4 s)))
                      (float (nth 4 s))
                      25.0))
           (cond
@@ -4843,7 +4934,11 @@
   (mark:out
     (strcat "[INFO] Отрезков каркаса: " (itoa (+ (length vs) (length hs)))
             "  вертикальных " (itoa (length vs))
-            "  горизонтальных " (itoa (length hs))))
+            "  горизонтальных " (itoa (length hs))
+            (if (and (numberp *mark:line-vis*) (> *mark:line-vis* 0))
+              (strcat ". Видимых блоков из линий: " (itoa *mark:line-vis*)
+                      ", отступ 0")
+              "")))
   (list vs hs))
 
 (defun mark:fill-closed-cells (hits / axes vs hs cols rows iL iR nL nR
@@ -4999,6 +5094,8 @@
           nil)
         (progn
           (setq t0 (getvar "MILLISECS"))
+          (setq *mark:fill-undo-off* nil
+                *mark:fill-miss* nil)
           (if (and doc (not *mark:batch-undo*))
             (mark:ax-invoke-ok doc "StartUndoMark" nil))
           (foreach cell cells
@@ -5026,8 +5123,9 @@
                           "  H=" (rtos h 2 0))))))
           (setq t1 (getvar "MILLISECS")
                 t_ins (/ (- t1 t0) 1000.0))
-          (if (and doc (not *mark:batch-undo*))
+          (if (and doc (not *mark:batch-undo*) (not *mark:fill-undo-off*))
             (mark:ax-invoke-ok doc "EndUndoMark" nil))
+          (setq *mark:fill-undo-off* nil)
           (mark:out
             (strcat "[INFO] Вставлено заполнений: " (itoa n)
                     " (время вставки: " (rtos t_ins 2 2) " с, "
@@ -5106,23 +5204,59 @@
       (mark:ax-invoke-ok doc "EndUndoMark" nil)
       segs)))
 
+(defun mark:fill-def-has-mline (bname depth / rec e ed typ nm hit)
+  (if (or (not (mark:strp bname)) (= bname "") (>= depth 4))
+    nil
+    (progn
+      (setq rec (tblsearch "BLOCK" bname)
+            e   (if rec (cdr (assoc -2 rec)) nil)
+            hit nil)
+      (while (and e (null hit)
+                  (setq ed (entget e))
+                  (/= "ENDBLK" (cdr (assoc 0 ed))))
+        (setq typ (cdr (assoc 0 ed)))
+        (cond
+          ((= typ "MLINE") (setq hit t))
+          ((= typ "INSERT")
+           (setq nm (cdr (assoc 2 ed))
+                 hit (if nm (mark:fill-def-has-mline nm (1+ depth)) nil))))
+        (setq e (entnext e)))
+      hit)))
+
+(defun mark:fill-lines-hw0 (segs / s out)
+  (setq out nil)
+  (foreach s segs
+    (setq out
+      (cons (if (and (> (length s) 4) (numberp (nth 4 s)))
+              s
+              (list (nth 0 s) (nth 1 s) (nth 2 s) (nth 3 s) 0.0))
+            out)))
+  (reverse out))
+
 (defun mark:fill-segs-of-ins (e / ed nm mat segs)
+  ;; Мультилиния — как раньше, из определения, с полушириной.
+  ;; Линии динблока — только текущая видимость, без отступа 25 мм.
   (setq ed  (entget e)
         nm  (if ed (cdr (assoc 2 ed)) nil)
-        mat (if ed (mark:fill-mat-of ed) nil)
-        segs (if (and nm mat) (mark:fill-def-segs nm mat 0) nil))
+        mat (if ed (mark:fill-mat-of ed) nil))
+  (if (and nm (mark:fill-def-has-mline nm 0))
+    (setq segs (if mat (mark:fill-def-segs nm mat 0) nil))
+    (progn
+      (setq segs (mark:fill-lines-hw0 (mark:fill-explode-segs e))
+            *mark:line-vis* (1+ (if (numberp *mark:line-vis*) *mark:line-vis* 0)))
+      (if (or (null segs) (< (length segs) 2))
+        (progn
+          (setq segs (mark:fill-lines-hw0
+                       (if (and nm mat) (mark:fill-def-segs nm mat 0) nil)))
+          (if (null *mark:dyn-quiet*)
+            (mark:out "[WARN] Видимый каркас не прочитан — линии из определения, отступ 0."))))))
   (if (null *mark:dyn-quiet*)
     (mark:out
       (strcat "[INFO] Блок «" (mark:fill-eff-name e)
-              "»: отрезков " (itoa (length segs)))))
-  (if (or (null segs) (< (length segs) 4))
-    (progn
-      (if (null *mark:dyn-quiet*)
-        (mark:out "[INFO] В определении мало линий — читаю видимый каркас блока."))
-      (setq segs (mark:fill-explode-segs e))
-      (if (null *mark:dyn-quiet*)
-        (mark:out
-          (strcat "[INFO] Видимый каркас: отрезков " (itoa (length segs)))))))
+              "»: отрезков " (itoa (length segs))
+              (if (and nm (mark:fill-def-has-mline nm 0))
+                ""
+                ", видимые линии, отступ 0"))))
   segs)
 
 (defun mark:fill-dyn-cell (ptu ptw cells pts / hits segs r win)
