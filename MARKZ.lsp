@@ -78,7 +78,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 30")
+(setq *mark:rev*    "Ред. 31")
 
 ;; МАРКА: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4029,20 +4029,47 @@
             dy (- (float (cadr p)) (float (cadr pt))))
       (sqrt (+ (* dx dx) (* dy dy))))))
 
-(defun mark:fill-insert-hits (pt / ss i e nm hits win)
-  ;; Габарит INSERT часто не содержит пустую ячейку. Берём блоки,
-  ;; чья графика пересекает окно вокруг точки.
-  (setq win (if (and (numberp *mark:fill-window*) (> *mark:fill-window* 0.0))
-              *mark:fill-window*
-              5000.0)
-        ss  (mark:fill-ss-inserts pt win)
-        hits nil)
-  (if (null ss)
+
+(defun mark:fill-bb-dist (pt e / bb x y dx dy)
+  (setq bb (mark:cell-bb e)
+        x  (float (car pt))
+        y  (float (cadr pt)))
+  (if (and bb
+           (> (abs (- (nth 2 bb) (nth 0 bb))) 1.0)
+           (> (abs (- (nth 3 bb) (nth 1 bb))) 1.0))
     (progn
-      (mark:out
-        (strcat "[INFO] В окне " (rtos win 2 0) " блоков нет — расширяю окно."))
-      (setq ss (mark:fill-ss-inserts pt (* win 4.0)))))
-  (if ss
+      (setq dx (max 0.0 (- (nth 0 bb) x) (- x (nth 2 bb)))
+            dy (max 0.0 (- (nth 1 bb) y) (- y (nth 3 bb))))
+      (sqrt (+ (* dx dx) (* dy dy))))
+    (mark:fill-ins-dist pt e)))
+
+(defun mark:fill-hit-report (hits / acc pair nm out first piece)
+  (setq acc nil)
+  (foreach hit hits
+    (setq nm (mark:fill-eff-name (cadr hit))
+          pair (assoc nm acc))
+    (if pair
+      (setq acc (subst (cons nm (1+ (cdr pair))) pair acc))
+      (setq acc (cons (cons nm 1) acc))))
+  (setq out nil
+        first t)
+  (foreach pair acc
+    (setq piece (strcat (if (car pair) (car pair) "?") "=" (itoa (cdr pair))))
+    (if first
+      (setq first nil
+            out piece)
+      (setq out (strcat out " " piece))))
+  (mark:out
+    (strcat "[INFO] Блоков каркаса: " (itoa (length hits))
+            (if out (strcat " (" out ")") ""))))
+
+(defun mark:fill-near-inserts (pt win / ss i e nm d hits)
+  (mark:out
+    (strcat "[INFO] Ищу вставки в пределах " (rtos win 2 0) " от точки…"))
+  (setq ss (vl-catch-all-apply 'ssget
+             (list "X" (list (cons 0 "INSERT"))))
+        hits nil)
+  (if (and ss (not (vl-catch-all-error-p ss)))
     (progn
       (setq i (sslength ss))
       (repeat i
@@ -4050,13 +4077,79 @@
               e (ssname ss i)
               nm (mark:fill-eff-name e))
         (if (not (mark:fill-skip-block? nm))
-          (setq hits (cons (list (mark:fill-ins-dist pt e) e) hits))))))
-  (mark:out
-    (strcat "[INFO] Блоков у точки: " (itoa (length hits))))
-  (mark:fill-hits-take (mark:fill-hits-sort hits) 8))
+          (progn
+            (setq d (mark:fill-bb-dist pt e))
+            (if (<= d win)
+              (setq hits (cons (list d e) hits))))))))
+  (mark:fill-hits-take (mark:fill-hits-sort hits) 40))
+
+(defun mark:fill-set-near (hits pt win / best d)
+  (setq best nil)
+  (foreach hit hits
+    (setq d (mark:fill-bb-dist pt (cadr hit)))
+    (if (or (null best) (< d best))
+      (setq best d)))
+  (and best (<= best win)))
+
+(defun mark:fill-hits-segs (hits / segs part)
+  (setq segs nil
+        *mark:dyn-quiet* t)
+  (foreach hit hits
+    (setq part (mark:fill-segs-of-ins (cadr hit)))
+    (if part
+      (setq segs (append part segs))))
+  (setq *mark:dyn-quiet* nil)
+  segs)
+
+(defun mark:fill-pick-frame (/ ss i e nm hits)
+  (mark:out "[INFO] Выберите стойки и ригели рамкой. Enter — пропуск.")
+  (setq ss (vl-catch-all-apply 'ssget
+             (list (list (cons 0 "INSERT")))))
+  (setq hits nil)
+  (if (and ss (not (vl-catch-all-error-p ss)))
+    (progn
+      (setq i (sslength ss))
+      (repeat i
+        (setq i (1- i)
+              e (ssname ss i)
+              nm (mark:fill-eff-name e))
+        (if (not (mark:fill-skip-block? nm))
+          (setq hits (cons (list 0.0 e) hits))))))
+  (if hits
+    (mark:fill-hit-report hits))
+  hits)
+
+(defun mark:fill-insert-hits (ptu ptw / ss hits win)
+  ;; Пустая ячейка не лежит внутри габарита стойки. Берём все вставки рядом.
+  (setq win (if (and (numberp *mark:fill-window*) (> *mark:fill-window* 0.0))
+              *mark:fill-window*
+              5000.0)
+        ss  (mark:fill-ss-inserts ptu win)
+        hits nil)
+  (if ss
+    (setq hits (mark:fill-hits-take
+                 (mark:fill-hits-sort (mark:fill-ss-hits ss ptw))
+                 40)))
+  (if (null hits)
+    (setq hits (mark:fill-near-inserts ptw win)))
+  (if (null hits)
+    (setq hits (mark:fill-near-inserts ptw (* win 4.0))))
+  (mark:fill-hit-report hits)
+  hits)
+
+(defun mark:fill-ss-hits (ss pt / i e nm hits)
+  (setq hits nil
+        i (if ss (sslength ss) 0))
+  (repeat i
+    (setq i (1- i)
+          e (ssname ss i)
+          nm (mark:fill-eff-name e))
+    (if (not (mark:fill-skip-block? nm))
+      (setq hits (cons (list (mark:fill-bb-dist pt e) e) hits))))
+  hits)
 
 (defun mark:fill-inserts-at (pt / hits)
-  (setq hits (mark:fill-insert-hits pt))
+  (setq hits (mark:fill-insert-hits pt pt))
   (if hits (cadr (car hits)) nil))
 
 (defun mark:fill-block-segs-at (pt / e ed nm mat segs)
@@ -4767,48 +4860,70 @@
         nm  (if ed (cdr (assoc 2 ed)) nil)
         mat (if ed (mark:fill-mat-of ed) nil)
         segs (if (and nm mat) (mark:fill-def-segs nm mat 0) nil))
-  (mark:out
-    (strcat "[INFO] Блок «" (mark:fill-eff-name e)
-            "»: отрезков " (itoa (length segs))))
+  (if (null *mark:dyn-quiet*)
+    (mark:out
+      (strcat "[INFO] Блок «" (mark:fill-eff-name e)
+              "»: отрезков " (itoa (length segs)))))
   (if (or (null segs) (< (length segs) 4))
     (progn
-      (mark:out "[INFO] В определении мало линий — читаю видимый каркас блока.")
+      (if (null *mark:dyn-quiet*)
+        (mark:out "[INFO] В определении мало линий — читаю видимый каркас блока."))
       (setq segs (mark:fill-explode-segs e))
-      (mark:out
-        (strcat "[INFO] Видимый каркас: отрезков " (itoa (length segs))))))
+      (if (null *mark:dyn-quiet*)
+        (mark:out
+          (strcat "[INFO] Видимый каркас: отрезков " (itoa (length segs)))))))
   segs)
 
-(defun mark:fill-dyn-cell (ptu ptw cells pts / hits e segs r)
-  (setq r nil)
-  (if *mark:dyn-ins*
-    (setq hits (list (list 0.0 *mark:dyn-ins*)))
-    (setq hits (mark:fill-insert-hits ptu)))
-  (if (null hits)
+(defun mark:fill-dyn-cell (ptu ptw cells pts / hits segs r win)
+  ;; Ячейка — пустота между вставками (стойка, ригель), не одна стойка.
+  (setq win (if (and (numberp *mark:fill-window*) (> *mark:fill-window* 0.0))
+              *mark:fill-window*
+              5000.0)
+        r nil)
+  (if (and *mark:dyn-set* (mark:fill-set-near *mark:dyn-set* ptw win))
     (progn
-      (setq e (mark:fill-pick-insert))
-      (if e
-        (setq *mark:dyn-ins* e
-              hits (list (list 0.0 e)))
-        (mark:out "[INFO] Блок не указан."))))
-  (foreach hit hits
-    (if (null r)
-      (progn
-        (setq e (cadr hit)
-              segs (mark:fill-segs-of-ins e))
-        (if (and segs (>= (length segs) 4))
-          (setq r (mark:fill-try-segs segs ptw cells pts))))))
-  (if r
-    r
+      (setq hits *mark:dyn-set*)
+      (mark:out "[INFO] Каркас прежний."))
+    (setq hits (mark:fill-insert-hits ptu ptw)))
+  (setq segs (mark:fill-hits-segs hits))
+  (mark:out
+    (strcat "[INFO] Отрезков каркаса: " (itoa (length segs))))
+  (if (>= (length segs) 4)
+    (setq r (mark:fill-try-segs segs ptw cells pts)))
+  (if (and (null r) hits)
     (progn
+      (mark:out "[INFO] В этом окне ячейка не собрана — беру блоки дальше.")
+      (setq hits (mark:fill-near-inserts ptw (* win 4.0))
+            segs (mark:fill-hits-segs hits))
+      (mark:out
+        (strcat "[INFO] Отрезков каркаса: " (itoa (length segs))))
+      (if (>= (length segs) 4)
+        (setq r (mark:fill-try-segs segs ptw cells pts)))))
+  (if (and (null r) (null *mark:dyn-set*))
+    (progn
+      (setq hits (mark:fill-pick-frame))
       (if hits
-        (mark:out "[INFO] В динамическом блоке ячейка под точкой не собрана."))
+        (progn
+          (setq *mark:dyn-set* hits
+                segs (mark:fill-hits-segs hits))
+          (mark:out
+            (strcat "[INFO] Отрезков выбранного каркаса: " (itoa (length segs))))
+          (if (>= (length segs) 4)
+            (setq r (mark:fill-try-segs segs ptw cells pts))))
+        (mark:out "[INFO] Блоки каркаса не выбраны."))))
+  (if r
+    (progn
+      (setq *mark:dyn-set* hits)
+      r)
+    (progn
+      (mark:out "[INFO] Ячейка между блоками каркаса не собрана.")
       (list cells pts))))
 
 (defun mark:fill-mode-dyn (cells pts / pt)
   (setq pt (getpoint "\nДинамика-точка внутри ячейки <Enter — конец>: "))
   (if (null pt)
     (progn
-      (mark:out "[INFO] Конец режима «Точка (динамика)».")
+      (mark:out "[INFO] Конец режима «Динамика-точка».")
       (list nil nil 'cancel))
     (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts)))
 
@@ -4880,6 +4995,7 @@
          "[INFO] Режим «Точка (мультилинии)» завершён. Вставлено: ")))
     ((= mode "4")
      (setq *mark:dyn-ins* nil
+           *mark:dyn-set* nil
            *mark:dyn-bb*  nil
            ins-list
        (mark:fill-points-loop
@@ -4887,6 +5003,7 @@
          "[INFO] Динамика-точка: ячейка из блока, не из мультилиний чертежа. Enter — конец."
          "[INFO] Режим «Динамика-точка» завершён. Вставлено: "))
      (setq *mark:dyn-ins* nil
+           *mark:dyn-set* nil
            *mark:dyn-bb*  nil))
     ((= mode "3")
      (setq r        (mark:fill-mode-grid cells pts)
@@ -5014,13 +5131,16 @@
       (entmake '((0 . "ENDBLK")))
       t)))
 
-(defun mark:test-insert (nm x y)
-  (entmake (list '(0 . "INSERT")
-                 (cons 2 nm)
-                 (list 10 x y 0.0)
-                 '(41 . 1.0)
-                 '(42 . 1.0)
-                 '(50 . 0.0))))
+(defun mark:test-insert (nm x y / r)
+  (setq r (entmake (list '(0 . "INSERT")
+                         (cons 2 nm)
+                         (list 10 x y 0.0)
+                         '(41 . 1.0)
+                         '(42 . 1.0)
+                         '(50 . 0.0))))
+  (if (and r (listp r) (assoc -1 r))
+    (cdr (assoc -1 r))
+    (if r (entlast) nil)))
 
 (defun c:МАРКАТЕСТ (/ doc e segs bb w h ok x y hits found)
   (mark:out "========================================")
@@ -5054,7 +5174,7 @@
                 (strcat "[TEST] Ячейка W=" (rtos w 2 1)
                         " H=" (rtos h 2 1)
                         (if ok " — OK" " — FAIL")))))
-          (setq hits (mark:fill-insert-hits (list x y))
+          (setq hits (mark:fill-insert-hits (list x y) (list x y))
                 found nil)
           (foreach hit hits
             (if (eq (cadr hit) e) (setq found t)))
