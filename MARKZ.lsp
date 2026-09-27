@@ -3660,36 +3660,69 @@
 
 ;;; ---- список €чеек + дедуп --------------------------------------------
 
-(defun mark:fill-add (cells pts bb / x0 y0 x1 y1 w h dup p)
+
+(defun mark:fill-opening-block? (name / u)
+  (setq u (strcase (if name name "")))
+  (or (wcmatch u "* Ќ*")
+      (wcmatch u "*ƒ¬≈–*")))
+
+(defun mark:fill-cell-opening? (bb / ss i e ed nm hit)
+  (setq hit nil)
+  (if bb
+    (progn
+      (setq ss (vl-catch-all-apply 'ssget
+                 (list "C"
+                       (list (nth 0 bb) (nth 1 bb))
+                       (list (nth 2 bb) (nth 3 bb))
+                       (list (cons 0 "INSERT")))))
+      (if (and ss (not (vl-catch-all-error-p ss)))
+        (progn
+          (setq i (sslength ss))
+          (while (and (> i 0) (null hit))
+            (setq i (1- i)
+                  e (ssname ss i)
+                  ed (entget e)
+                  nm (if ed (mark:fill-eff-name e) nil))
+            (if (mark:fill-opening-block? nm)
+              (setq hit nm)))))))
+  hit)
+
+(defun mark:fill-add (cells pts bb / x0 y0 x1 y1 w h dup p opening)
   (if (null bb)
     (list cells pts)
     (progn
-      (setq x0 (nth 0 bb)
-            y0 (nth 1 bb)
-            x1 (nth 2 bb)
-            y1 (nth 3 bb)
-            w  (- x1 x0)
-            h  (- y1 y0)
-            dup nil)
-      (foreach p pts
-        (if (and (null dup)
-                 (<= (distance (list x0 y0 0.0)
-                               (list (car p) (cadr p) 0.0))
-                     *mark:ar-tol*))
-          (setq dup t)))
-      (if dup
+      (setq opening (mark:fill-cell-opening? bb))
+      (if opening
         (progn
-          (mark:out "[INFO] ячейка уже в списке Ч пропуск.")
+          (mark:out (strcat "[INFO] ячейка с блоком проЄма " opening " Ч пропуск."))
           (list cells pts))
         (progn
-          (setq cells (cons bb cells)
-                pts   (cons (list x0 y0) pts))
-          (mark:out
-            (strcat "  €чейка " (itoa (length cells))
-                    ": " (rtos x0 2 4) "," (rtos y0 2 4)
-                    "  W=" (rtos w 2 4)
-                    "  H=" (rtos h 2 4)))
-          (list cells pts))))))
+          (setq x0 (nth 0 bb)
+                y0 (nth 1 bb)
+                x1 (nth 2 bb)
+                y1 (nth 3 bb)
+                w  (- x1 x0)
+                h  (- y1 y0)
+                dup nil)
+          (foreach p pts
+            (if (and (null dup)
+                     (<= (distance (list x0 y0 0.0)
+                                   (list (car p) (cadr p) 0.0))
+                         *mark:ar-tol*))
+              (setq dup t)))
+          (if dup
+            (progn
+              (mark:out "[INFO] ячейка уже в списке Ч пропуск.")
+              (list cells pts))
+            (progn
+              (setq cells (cons bb cells)
+                    pts   (cons (list x0 y0) pts))
+              (mark:out
+                (strcat "  €чейка " (itoa (length cells))
+                        ": " (rtos x0 2 4) "," (rtos y0 2 4)
+                        "  W=" (rtos w 2 4)
+                        "  H=" (rtos h 2 4)))
+              (list cells pts))))))))
 
 ;;; ---- вершины / точка в полигоне --------------------------------------
 
@@ -3754,8 +3787,11 @@
     (cond
       ((= typ "INSERT")
        (setq nm (mark:fill-eff-name e))
-       (if (not (mark:fill-skip-block? nm))
-         (setq r (mark:fill-segs-of-ins e))))
+       (if (and (not (mark:fill-skip-block? nm))
+                (not (mark:fill-opening-block? nm)))
+         (setq r (mark:fill-segs-of-ins e)))
+       (if (mark:fill-opening-block? nm)
+         (mark:out (strcat "[INFO] Ѕлок проЄма пропущен: " nm))))
       ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
        (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
        (if (vl-catch-all-error-p r) (setq r nil))))
@@ -3812,6 +3848,11 @@
                   *mark:fill-window* 5000.0)
             pt (mark:fill-pt-wcs pt)
             ss (mark:fill-all-near-ss pt win))
+      (if (null ss)
+        (progn
+          (setq win (* win 4.0)
+                ss (mark:fill-all-near-ss pt win)))
+        nil)
       (if (null ss)
         (progn
           (mark:out "[WARN] –€дом с точкой не найдены объекты каркаса.")
