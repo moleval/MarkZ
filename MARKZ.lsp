@@ -3925,7 +3925,11 @@
       (if segs
         (progn
           (setq r (mark:fill-segs->cells segs))
-          (foreach bb (car r) (setq all-bb (cons bb all-bb)))))
+          ;; Не принимаем прямоугольник только по совпадению осей:
+          ;; все четыре стороны должны реально закрываться сегментами.
+          (foreach bb (car r)
+            (if (mark:fill-box-closed segs bb)
+              (setq all-bb (cons bb all-bb))))))
       (mark:out (strcat "[INFO] Универсальная сетка: блоковых ячеек "
                         (itoa (length block-cells))))
       (mark:out (strcat "[INFO] Универсальная сетка: всего кандидатов "
@@ -3990,12 +3994,12 @@
                (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
                (if (and r (not (vl-catch-all-error-p r)))
                  (setq lsegs (append r lsegs)))))
-          (setq r (if bsegs (mark:fill-try-segs bsegs pt cells pts) nil))
-          (if (null r)
+          ;; Сначала используем проверенную старую точку-динамику.
+          (setq r (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts))
+          (if (or (null r) (null (car r)))
+            (setq r (if bsegs (mark:fill-try-segs bsegs pt cells pts) nil)))
+          (if (or (null r) (null (car r)))
             (setq r (if lsegs (mark:fill-try-segs lsegs pt cells pts) nil)))
-          ;; Последний fallback — проверенная логика старой точки-динамики.
-          (if (null r)
-            (setq r (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts)))
           (if r r (list cells pts))))))))
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
   (mark:out "Тыкайте в границы ячеек (замкнутые полилинии и т.п.).")
