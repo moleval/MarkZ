@@ -3975,9 +3975,7 @@
         (setq r (mark:fill-add cells pts bb)
               cells (car r)
               pts (cadr r)))
-      (list cells pts))))
-
-
+      (list cells pts)))))
 (defun mark:fill-all-near-ss (pt win / p0 p1 filter ss ins out i)
   (setq p0 (list (- (car pt) win) (- (cadr pt) win))
         p1 (list (+ (car pt) win) (+ (cadr pt) win))
