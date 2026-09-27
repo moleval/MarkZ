@@ -3666,7 +3666,9 @@
   (or (wcmatch u "*КН*")
       (wcmatch u "*ДВЕР*")))
 
-(defun mark:fill-load-openings (/ ss i e ed nm eb out)
+(defun mark:fill-load-openings (/ ss i e ed nm p out)
+  ;; Быстрый фильтр: точка вставки окна/двери должна попасть в ячейку.
+  ;; Геометрию проёмов здесь не разбираем, чтобы не запускать динамический анализ.
   (setq out nil
         ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT")))))
   (if (and ss (not (vl-catch-all-error-p ss)))
@@ -3676,27 +3678,25 @@
         (setq i (1- i)
               e (ssname ss i)
               ed (entget e)
-              nm (if ed (mark:fill-eff-name e) nil))
-        (if (mark:fill-opening-block? nm)
-          (progn
-            (setq eb (mark:cell-bb e))
-            (if eb (setq out (cons (list nm eb) out))))))))
+              nm (if ed (mark:fill-eff-name e) nil)
+              p (if ed (cdr (assoc 10 ed)) nil))
+        (if (and (mark:fill-opening-block? nm) p)
+          (setq out (cons (list nm (list p p)) out))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
   (mark:out (strcat "[INFO] Проёмов для фильтра: " (itoa (length out))))
   out)
 
-(defun mark:fill-cell-opening? (bb / hit item eb)
+(defun mark:fill-cell-opening? (bb / hit item eb p)
   (if (and bb (not *mark:opening-loaded*))
     (mark:fill-load-openings))
   (setq hit nil)
   (foreach item *mark:opening-bbs*
-    (setq eb (cadr item))
-    (if (and (null hit) eb
-             (< (nth 0 bb) (nth 2 eb))
-             (> (nth 2 bb) (nth 0 eb))
-             (< (nth 1 bb) (nth 3 eb))
-             (> (nth 3 bb) (nth 1 eb)))
+    (setq eb (cadr item)
+          p (car eb))
+    (if (and (null hit) p
+             (>= (car p) (nth 0 bb)) (<= (car p) (nth 2 bb))
+             (>= (cadr p) (nth 1 bb)) (<= (cadr p) (nth 3 bb)))
       (setq hit (car item))))
   hit)
 
