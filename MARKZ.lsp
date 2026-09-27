@@ -3666,30 +3666,40 @@
   (or (wcmatch u "*КН*")
       (wcmatch u "*ДВЕР*")))
 
-(defun mark:fill-cell-opening? (bb / ss i e ed nm eb hit)
-  ;; Проверяем реальные габариты INSERT, а не только точку вставки.
-  ;; Поэтому проём обнаруживается даже если его insertion point вне ячейки.
-  (setq hit nil)
-  (if bb
+(defun mark:fill-load-openings (/ ss i e ed nm eb out)
+  (setq out nil
+        ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT")))))
+  (if (and ss (not (vl-catch-all-error-p ss)))
     (progn
-      (setq ss (vl-catch-all-apply 'ssget
-                 (list "X" (list (cons 0 "INSERT")))))
-      (if (and ss (not (vl-catch-all-error-p ss)))
-        (progn
-          (setq i (sslength ss))
-          (while (and (> i 0) (null hit))
-            (setq i (1- i)
-                  e (ssname ss i)
-                  ed (entget e)
-                  nm (if ed (mark:fill-eff-name e) nil)
-                  eb (mark:cell-bb e))
-            (if (and (mark:fill-opening-block? nm) eb
-                     (< (nth 0 bb) (nth 2 eb))
-                     (> (nth 2 bb) (nth 0 eb))
-                     (< (nth 1 bb) (nth 3 eb))
-                     (> (nth 3 bb) (nth 1 eb)))
-              (setq hit nm)))))))
+      (setq i (sslength ss))
+      (while (> i 0)
+        (setq i (1- i)
+              e (ssname ss i)
+              ed (entget e)
+              nm (if ed (mark:fill-eff-name e) nil))
+        (if (mark:fill-opening-block? nm)
+          (progn
+            (setq eb (mark:cell-bb e))
+            (if eb (setq out (cons (list nm eb) out))))))))
+  (setq *mark:opening-bbs* out
+        *mark:opening-loaded* t)
+  (mark:out (strcat "[INFO] Проёмов для фильтра: " (itoa (length out))))
+  out)
+
+(defun mark:fill-cell-opening? (bb / hit item eb)
+  (if (and bb (not *mark:opening-loaded*))
+    (mark:fill-load-openings))
+  (setq hit nil)
+  (foreach item *mark:opening-bbs*
+    (setq eb (cadr item))
+    (if (and (null hit) eb
+             (< (nth 0 bb) (nth 2 eb))
+             (> (nth 2 bb) (nth 0 eb))
+             (< (nth 1 bb) (nth 3 eb))
+             (> (nth 3 bb) (nth 1 eb)))
+      (setq hit (car item))))
   hit)
+
 
 (defun mark:fill-seg-touch? (a b tol / ax ay az bx by bz)
   (setq ax (list (nth 0 a) (nth 1 a))
@@ -3841,7 +3851,7 @@
                     ", отрезков: " (itoa (length out))))
   out)
 
-(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks all-bb bb)
+(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks block-cells all-bb bb)
   (mark:out "5-Сетка-все-типы: блоки, линии, полилинии и мультилинии.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
   (setq ss (mark:fill-all-ss)
@@ -3871,7 +3881,8 @@
       ;; Динамические блоки обрабатываются ровно старым 3-Сетка-динамика.
       (if blocks
         (progn
-          (setq r (mark:fill-closed-cells blocks))
+          (setq block-cells (mark:fill-closed-cells blocks)
+                r block-cells)
           (foreach bb r (setq all-bb (cons bb all-bb)))))
       ;; Линии и MLINE обрабатываются ровно старым Сетка-мультилинии.
       (if segs
@@ -3879,7 +3890,7 @@
           (setq r (mark:fill-segs->cells segs))
           (foreach bb (car r) (setq all-bb (cons bb all-bb)))))
       (mark:out (strcat "[INFO] Универсальная сетка: блоковых ячеек "
-                        (itoa (length (if blocks (mark:fill-closed-cells blocks) nil)))))
+                        (itoa (length block-cells))))
       (mark:out (strcat "[INFO] Универсальная сетка: всего кандидатов "
                         (itoa (length all-bb))))
       (foreach bb all-bb
@@ -6014,6 +6025,8 @@
   (mark:cmd-line
     "МАРКАЗАПБЛОК — вставка «Заполнение в витраж». Список: Сетка-мультилинии, Точка-мультилинии, 3-Сетка-динамика, 4-Точка-динамика, 5-Сетка-все-типы, 6-Точка-все-типы, Полилинии. Марки не пишет.")
   (mark:reset-state)
+  (setq *mark:opening-bbs* nil
+        *mark:opening-loaded* nil)
   (mark:banner)
   (mark:out "МАРКАЗАПБЛОК — вставка «Заполнение в витраж» по ячейкам")
   (setq mode (if forced forced (mark:fill-ask-mode)))
