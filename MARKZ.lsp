@@ -2644,7 +2644,7 @@
   (princ))
 
 (defun c:MARKTABLE () (mtab:main))
-(defun c:Ã¿– ¿“¿¡À () (mtab:main))
+(defun c:Ã¿– ¿«¿œ“¿¡À () (mtab:main))
 
 
 ;;;=====================================================================
@@ -5922,10 +5922,13 @@
   (princ))
 (defun c:Ã¿– ¿–Œ¬ ¿ () (mark:main))
 (defun c:MARKZ () (mark:main))
-(defun c:Ã¿– ¿–ﬂƒ () (mark:ar-main))
+(defun c:Ã¿– ¿–Œ¬ ¿«¿œ () (mark:main))
 (defun c:MARKAR () (mark:ar-main))
+(defun c:Ã¿– ¿«¿œ–ﬂƒ () (mark:ar-main))
 (defun c:MARKA () (mark:a-all))
-(defun c:Ã¿– ¿ () (mark:a-all))
+(defun c:Ã¿– ¿«¿œ () (mark:a-all))
+(defun c:Ã¿– ¿«¿œ¡ÀŒ  () (mark:fill-main))
+(defun c:MARKFILL () (mark:fill-main))
 
 (defun mark:test-line (x0 y0 x1 y1)
   (entmake (list '(0 . "LINE")
