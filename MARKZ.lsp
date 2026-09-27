@@ -3851,12 +3851,45 @@
                     ", отрезков: " (itoa (length out))))
   out)
 
-(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks block-cells all-bb bb)
+
+(defun mark:fill-seg-same? (a b / t0)
+  (setq t0 *mark:fill-tol*)
+  (or (and (<= (distance (list (nth 0 a) (nth 1 a) 0.0)
+                         (list (nth 0 b) (nth 1 b) 0.0)) t0)
+           (<= (distance (list (nth 2 a) (nth 3 a) 0.0)
+                         (list (nth 2 b) (nth 3 b) 0.0)) t0))
+      (and (<= (distance (list (nth 0 a) (nth 1 a) 0.0)
+                         (list (nth 2 b) (nth 3 b) 0.0)) t0)
+           (<= (distance (list (nth 2 a) (nth 3 a) 0.0)
+                         (list (nth 0 b) (nth 1 b) 0.0)) t0))))
+
+(defun mark:fill-segs-unique (segs / out s hit)
+  (setq out nil)
+  (foreach s segs
+    (setq hit nil)
+    (foreach x out
+      (if (mark:fill-seg-same? s x) (setq hit t)))
+    (if (null hit) (setq out (cons s out))))
+  (reverse out))
+
+(defun mark:fill-block-seen? (seen nm e / p hit q)
+  (setq p (cdr (assoc 10 (entget e)))
+        hit nil)
+  (foreach q seen
+    (if (and (= (strcase nm) (strcase (car q)))
+             p (<= (distance (list (car p) (cadr p) 0.0)
+                            (list (car (cdr q)) (cadr (cdr q)) 0.0))
+                    *mark:fill-tol*))
+      (setq hit t)))
+  hit)
+
+(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks block-cells all-bb bb seen)
   (mark:out "5-Сетка-все-типы: блоки, линии, полилинии и мультилинии.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
   (setq ss (mark:fill-all-ss)
         segs nil
-        blocks nil)
+        blocks nil
+        seen nil)
   (if (null ss)
     (list cells pts 'cancel)
     (progn
@@ -3871,13 +3904,17 @@
           ((= typ "INSERT")
            (setq nm (mark:fill-eff-name e))
            (if (and (not (mark:fill-skip-block? nm))
-                    (not (mark:fill-opening-block? nm)))
-             (setq blocks (cons (list 0.0 e) blocks))))
+                    (not (mark:fill-opening-block? nm))
+                    (not (mark:fill-block-seen? seen nm e)))
+             (progn
+               (setq blocks (cons (list 0.0 e) blocks)
+                     seen (cons (cons nm (cdr (assoc 10 ed))) seen)))))
           ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
              (setq segs (append r segs)))))
-      (setq all-bb nil)
+      (setq segs (mark:fill-segs-unique segs)
+            all-bb nil)
       ;; Динамические блоки обрабатываются ровно старым 3-Сетка-динамика.
       (if blocks
         (progn
@@ -3956,6 +3993,9 @@
           (setq r (if bsegs (mark:fill-try-segs bsegs pt cells pts) nil))
           (if (null r)
             (setq r (if lsegs (mark:fill-try-segs lsegs pt cells pts) nil)))
+          ;; Последний fallback — проверенная логика старой точки-динамики.
+          (if (null r)
+            (setq r (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts)))
           (if r r (list cells pts))))))))
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
   (mark:out "Тыкайте в границы ячеек (замкнутые полилинии и т.п.).")
