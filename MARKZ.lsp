@@ -2575,7 +2575,7 @@
   (princ))
 
 (defun c:MARKTABLE () (mtab:main))
-(defun c:ÌÀĞÊÀÒÀÁË () (mtab:main))
+(defun c:ÌÀĞÊÀÇÀÏÒÀÁË () (mtab:main))
 
 
 ;;;=====================================================================
@@ -4339,12 +4339,12 @@
         *mark:batch-undo* nil)
   (princ))
 (defun c:MARKZ () (mark:main))
-(defun c:ÌÀĞÊÀÇ () (mark:main))
+(defun c:ÌÀĞÊÀĞÎÂÊÀÇÀÏ () (mark:main))
 (defun c:MARKAR () (mark:ar-main))
-(defun c:ÌÀĞÊÀĞ () (mark:ar-main))
+(defun c:ÌÀĞÊÀÇÀÏĞßÄ () (mark:ar-main))
 (defun c:MARKA () (mark:a-all))
-(defun c:ÌÀĞÊÀ () (mark:a-all))
-(defun c:ÌÀĞÊÀÇÀË () (mark:fill-main))
+(defun c:ÌÀĞÊÀÇÀÏ () (mark:a-all))
+(defun c:ÌÀĞÊÀÇÀÏÁËÎÊ () (mark:fill-main))
 (defun c:MARKFILL () (mark:fill-main))
 
 ;; Ïğèíóäèòåëüíî î÷èùàåì ñòàğóş êîìàíäó c:ÌÀĞÊÀÇÀËÀ â ïàìÿòè AutoCAD
