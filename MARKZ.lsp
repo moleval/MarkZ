@@ -3739,6 +3739,89 @@
 
 ;;; ---- РЕЖИМ 1: полилинии -----------------------------------------------
 
+
+;;; ---- Режимы 5/6: универсальная геометрия ----------------------------
+(defun mark:fill-all-ss (/ filter ss)
+  (setq filter (list (cons 0 "INSERT,LINE,LWPOLYLINE,POLYLINE,MLINE,ARC")))
+  (setq ss (vl-catch-all-apply 'ssget (list filter)))
+  (if (or (vl-catch-all-error-p ss) (null ss)) nil ss))
+
+(defun mark:fill-all-segs (ss / i e ed typ r nm out n)
+  (setq out nil n 0 i (if ss (sslength ss) 0))
+  (while (> i 0)
+    (setq i (1- i) e (ssname ss i) ed (entget e)
+          typ (if ed (cdr (assoc 0 ed)) nil) r nil)
+    (cond
+      ((= typ "INSERT")
+       (setq nm (mark:fill-eff-name e))
+       (if (not (mark:fill-skip-block? nm))
+         (setq r (mark:fill-segs-of-ins e))))
+      ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
+       (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+       (if (vl-catch-all-error-p r) (setq r nil))))
+    (if r (progn (setq out (append r out) n (1+ n)))))
+  (mark:out (strcat "[INFO] Универсально обработано объектов: " (itoa n)
+                    ", отрезков: " (itoa (length out))))
+  out)
+
+(defun mark:fill-mode-all-grid (cells pts / ss segs r bb)
+  (mark:out "5-Сетка-все-типы: блоки, линии, полилинии и мультилинии.")
+  (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
+  (setq ss (mark:fill-all-ss))
+  (if (null ss)
+    (list cells pts 'cancel)
+    (progn
+      (mark:fill-type-stat ss)
+      (setq segs (mark:fill-all-segs ss))
+      (if (null segs)
+        (list cells pts)
+        (progn
+          (setq r (mark:fill-segs->cells segs))
+          (mark:out (strcat "[INFO] Универсальная сетка: осей X "
+                            (itoa (cadr r)) " Y " (itoa (caddr r))
+                            ", ячеек " (itoa (length (car r)))))
+          (foreach bb (car r)
+            (setq r (mark:fill-add cells pts bb)
+                  cells (car r) pts (cadr r)))
+          (list cells pts))))))
+
+(defun mark:fill-all-near-ss (pt win / p0 p1 filter ss ins out i)
+  (setq p0 (list (- (car pt) win) (- (cadr pt) win))
+        p1 (list (+ (car pt) win) (+ (cadr pt) win))
+        filter (list (cons 0 "INSERT,LINE,LWPOLYLINE,POLYLINE,MLINE,ARC"))
+        ss (vl-catch-all-apply 'ssget (list "C" p0 p1 filter))
+        out (if (and ss (not (vl-catch-all-error-p ss))) ss nil)
+        ins (mark:fill-ss-inserts pt win))
+  (if ins
+    (progn
+      (if (null out) (setq out (ssadd)))
+      (setq i (sslength ins))
+      (while (> i 0)
+        (setq i (1- i))
+        (if (null (ssmemb (ssname ins i) out))
+          (ssadd (ssname ins i) out)))))
+  out)
+
+(defun mark:fill-mode-all-point (cells pts / pt win ss segs r)
+  (setq pt (getpoint "\n6-Точка-все-типы: укажите точку внутри ячейки <Enter>: "))
+  (if (null pt)
+    (list cells pts 'cancel)
+    (progn
+      (setq win (if (and (numberp *mark:fill-window*)
+                         (> *mark:fill-window* 0.0))
+                  *mark:fill-window* 5000.0)
+            pt (mark:fill-pt-wcs pt)
+            ss (mark:fill-all-near-ss pt win))
+      (if (null ss)
+        (progn
+          (mark:out "[WARN] Рядом с точкой не найдены объекты каркаса.")
+          (list cells pts))
+        (progn
+          (mark:fill-type-stat ss)
+          (setq segs (mark:fill-all-segs ss)
+                r (mark:fill-try-segs segs pt cells pts))
+          (if r r (list cells pts)))))))
+
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
   (mark:out "Тыкайте в границы ячеек (замкнутые полилинии и т.п.).")
   (mark:out "Enter — конец выбора.")
@@ -5767,30 +5850,37 @@
   ;; Поэтому динамика в списке с цифрой. Команда Точка-динамика — отдельно.
   (mark:out "Точка-динамика: команда, либо 4, либо Д. Буква Т — Точка-мультилинии.")
   (initget (strcat "Сетка-мультилинии Точка-мультилинии "
-                   "3-Сетка-динамика 4-Точка-динамика Полилинии "
-                   "Динамика-точка Мультилинии-точка 1 2 5"))
+                   "3-Сетка-динамика 4-Точка-динамика 5-Сетка-все-типы 6-Точка-все-типы Полилинии "
+                   "Динамика-точка Мультилинии-точка 1 2 3 4 5 6 P"))
   (setq kw (getkword
     "\nРежим [Сетка-мультилинии/Точка-мультилинии/3-Сетка-динамика/4-Точка-динамика/Полилинии] <Сетка-мультилинии>: "))
   (cond
     ((or (null kw) (= kw "Сетка-мультилинии") (= kw "1"))
-     (setq mode "3"))
+     (setq mode "1"))
     ((or (= kw "Точка-мультилинии") (= kw "Мультилинии-точка") (= kw "2"))
      (setq mode "2"))
     ((or (= kw "3-Сетка-динамика") (= kw "3"))
-     (setq mode "5"))
+     (setq mode "3"))
     ((or (= kw "4-Точка-динамика") (= kw "4")
          (= kw "Динамика-точка") (= kw "Д"))
      (setq mode "4"))
-    ((or (= kw "Полилинии") (= kw "5"))
-     (setq mode "1"))
-    (t (setq mode "3")))
+    ((or (= kw "5-Сетка-все-типы") (= kw "5"))
+     (setq mode "5"))
+    ((or (= kw "6-Точка-все-типы") (= kw "6"))
+     (setq mode "6"))
+    ((or (= kw "Полилинии") (= kw "P"))
+     (setq mode "P"))
+    (t (setq mode "1")))
   (mark:out
     (strcat "[INFO] Ключ: " (if kw kw "<Enter>")
             " = "
             (cond ((= mode "2") "Точка-мультилинии")
-                  ((= mode "5") "Сетка-динамика")
+                  ((= mode "3") "Сетка-динамика")
+                  ((= mode "5") "Сетка-все-типы")
+                  ((= mode "6") "Точка-все-типы")
                   ((= mode "4") "Точка-динамика")
-                  ((= mode "1") "Полилинии")
+                  ((= mode "1") "Сетка-мультилинии")
+                  ((= mode "P") "Полилинии")
                   (t "Сетка-мультилинии"))))
   mode)
 
@@ -5807,7 +5897,9 @@
     (mark:out
       (strcat "[INFO] Команда = "
               (cond ((= mode "2") "Точка-мультилинии")
-                    ((= mode "5") "Сетка-динамика")
+                    ((= mode "3") "Сетка-динамика")
+                  ((= mode "5") "Сетка-все-типы")
+                  ((= mode "6") "Точка-все-типы")
                     ((= mode "4") "Точка-динамика")
                     ((= mode "1") "Полилинии")
                     (t "Сетка-мультилинии")))))
@@ -5834,7 +5926,7 @@
      (setq *mark:dyn-ins* nil
            *mark:dyn-set* nil
            *mark:dyn-bb*  nil))
-    ((= mode "5")
+    ((= mode "3")
      (setq r        (mark:fill-mode-grid-dyn cells pts)
            cells    (car r)
            pts      (cadr r)
@@ -5842,7 +5934,7 @@
            ins-list (mark:fill-apply cells pts))
      (if cells
        (mark:out (strcat "[ТАЙМИНГ] Расчет геометрии сетки: " (rtos t_geom 2 2) " с"))))
-    ((= mode "3")
+    ((= mode "1")
      (setq r        (mark:fill-mode-grid cells pts)
            cells    (car r)
            pts      (cadr r)
@@ -5850,6 +5942,17 @@
            ins-list (mark:fill-apply cells pts))
      (if cells
        (mark:out (strcat "[ТАЙМИНГ] Расчет геометрии сетки: " (rtos t_geom 2 2) " с"))))
+    ((= mode "5")
+     (setq r (mark:fill-mode-all-grid cells pts)
+           cells (car r) pts (cadr r)
+           t_geom (/ (- (getvar "MILLISECS") t_geom_start) 1000.0)
+           ins-list (mark:fill-apply cells pts)))
+    ((= mode "6")
+     (setq ins-list
+       (mark:fill-points-loop
+         'mark:fill-mode-all-point
+         "[INFO] 6-Точка-все-типы: точки внутри ячеек. Enter — завершение."
+         "[INFO] Точка-все-типы завершена. Вставлено: ")))
     (t
      (setq r        (mark:fill-mode-poly cells pts)
            cells    (car r)
@@ -6114,11 +6217,11 @@
 
 (defun c:МАРКАЗАПБЛОК () (mark:fill-main))
 (defun c:MARKFILL () (mark:fill-main))
-(defun c:Сетка-мультилинии () (setq *mark:fill-force* "3") (c:МАРКАЗАПБЛОК))
+(defun c:Сетка-мультилинии () (setq *mark:fill-force* "1") (c:МАРКАЗАПБЛОК))
 (defun c:Точка-мультилинии () (setq *mark:fill-force* "2") (c:МАРКАЗАПБЛОК))
-(defun c:Сетка-динамика () (setq *mark:fill-force* "5") (c:МАРКАЗАПБЛОК))
+(defun c:Сетка-динамика () (setq *mark:fill-force* "3") (c:МАРКАЗАПБЛОК))
 (defun c:Точка-динамика () (setq *mark:fill-force* "4") (c:МАРКАЗАПБЛОК))
-(defun c:Полилинии () (setq *mark:fill-force* "1") (c:МАРКАЗАПБЛОК))
+(defun c:Полилинии () (setq *mark:fill-force* "P") (c:МАРКАЗАПБЛОК))
 
 ;; Снять старые имена из памяти AutoCAD при повторной загрузке
 (setq c:МАРКИРОВКА nil)
