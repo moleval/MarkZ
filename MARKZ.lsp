@@ -3907,15 +3907,28 @@
        (<= (abs (- (nth 2 a) (nth 2 b))) t0)
        (<= (abs (- (nth 3 a) (nth 3 b))) t0)))
 
-(defun mark:fill-cells-unique (bbs / out bb hit x)
+(defun mark:fill-cells-unique (bbs / out bb hit old area oldarea x)
+  ;; Для одной точки вставки оставляем только ячейку меньшей площади.
+  ;; Это устраняет варианты 700/1375, возникающие при наложении источников.
   (setq out nil)
   (foreach bb bbs
-    (setq hit nil)
+    (setq hit nil old nil)
     (foreach x out
-      (if (mark:fill-bb-same? bb x) (setq hit t)))
-    (if (and (null hit) (null (mark:fill-cell-opening? bb)))
-      (setq out (cons bb out))))
+      (if (and (<= (abs (- (nth 0 bb) (nth 0 x))) *mark:fill-tol*)
+               (<= (abs (- (nth 1 bb) (nth 1 x))) *mark:fill-tol*))
+        (setq hit t old x)))
+    (if (null hit)
+      (if (null (mark:fill-cell-opening? bb))
+        (setq out (cons bb out)))
+      (progn
+        (setq area (* (- (nth 2 bb) (nth 0 bb))
+                      (- (nth 3 bb) (nth 1 bb)))
+              oldarea (* (- (nth 2 old) (nth 0 old))
+                         (- (nth 3 old) (nth 1 old))))
+        (if (< area oldarea)
+          (setq out (subst bb old out))))))
   (reverse out))
+
 
 (defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks block-cells line-cells all-bb bb seen)
   (mark:out "5-Сетка-все-типы: блоки, линии, полилинии и мультилинии.")
