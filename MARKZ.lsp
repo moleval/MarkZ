@@ -3899,7 +3899,25 @@
       (setq hit t)))
   hit)
 
-(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks block-cells all-bb bb seen)
+
+(defun mark:fill-bb-same? (a b / t0)
+  (setq t0 *mark:fill-tol*)
+  (and (<= (abs (- (nth 0 a) (nth 0 b))) t0)
+       (<= (abs (- (nth 1 a) (nth 1 b))) t0)
+       (<= (abs (- (nth 2 a) (nth 2 b))) t0)
+       (<= (abs (- (nth 3 a) (nth 3 b))) t0)))
+
+(defun mark:fill-cells-unique (bbs / out bb hit x)
+  (setq out nil)
+  (foreach bb bbs
+    (setq hit nil)
+    (foreach x out
+      (if (mark:fill-bb-same? bb x) (setq hit t)))
+    (if (and (null hit) (null (mark:fill-cell-opening? bb)))
+      (setq out (cons bb out))))
+  (reverse out))
+
+(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks block-cells line-cells all-bb bb seen)
   (mark:out "5-Сетка-все-типы: блоки, линии, полилинии и мультилинии.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
   (setq ss (mark:fill-all-ss)
@@ -3910,6 +3928,8 @@
     (list cells pts 'cancel)
     (progn
       (mark:fill-type-stat ss)
+      ;; Проёмы загружаются один раз до расчёта ячеек.
+      (mark:fill-load-openings)
       (setq i (sslength ss))
       (while (> i 0)
         (setq i (1- i)
@@ -3930,26 +3950,27 @@
            (if (and r (not (vl-catch-all-error-p r)))
              (setq segs (append r segs)))))
       (setq segs (mark:fill-segs-unique segs)
-            all-bb nil)
-      ;; Динамические блоки обрабатываются ровно старым 3-Сетка-динамика.
+            block-cells nil
+            line-cells nil)
+      ;; Блоковая часть: ровно один вызов старого алгоритма 3.
       (if blocks
-        (progn
-          (setq block-cells (mark:fill-closed-cells blocks)
-                r block-cells)
-          (foreach bb r (setq all-bb (cons bb all-bb)))))
-      ;; Линии и MLINE обрабатываются ровно старым Сетка-мультилинии.
+        (setq block-cells (mark:fill-closed-cells blocks)))
+      ;; Линейная часть: один расчёт по MLINE/LINE/POLYLINE.
       (if segs
         (progn
           (setq r (mark:fill-segs->cells segs))
-          ;; Не принимаем прямоугольник только по совпадению осей:
-          ;; все четыре стороны должны реально закрываться сегментами.
           (foreach bb (car r)
             (if (mark:fill-box-closed segs bb)
-              (setq all-bb (cons bb all-bb))))))
+              (setq line-cells (cons bb line-cells))))))
+      (setq all-bb (mark:fill-cells-unique
+                     (append block-cells (reverse line-cells))))
       (mark:out (strcat "[INFO] Универсальная сетка: блоковых ячеек "
                         (itoa (length block-cells))))
-      (mark:out (strcat "[INFO] Универсальная сетка: всего кандидатов "
+      (mark:out (strcat "[INFO] Универсальная сетка: линейных кандидатов "
+                        (itoa (length line-cells))))
+      (mark:out (strcat "[INFO] Универсальная сетка: уникальных ячеек "
                         (itoa (length all-bb))))
+      ;; Вставка выполняется один раз, после полного расчёта.
       (foreach bb all-bb
         (setq r (mark:fill-add cells pts bb)
               cells (car r)
