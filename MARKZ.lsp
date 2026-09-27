@@ -3666,15 +3666,14 @@
   (or (wcmatch u "*КН*")
       (wcmatch u "*ДВЕР*")))
 
-(defun mark:fill-cell-opening? (bb / ss i e ed nm hit)
+(defun mark:fill-cell-opening? (bb / ss i e ed nm eb hit)
+  ;; Проверяем реальные габариты INSERT, а не только точку вставки.
+  ;; Поэтому проём обнаруживается даже если его insertion point вне ячейки.
   (setq hit nil)
   (if bb
     (progn
       (setq ss (vl-catch-all-apply 'ssget
-                 (list "C"
-                       (list (nth 0 bb) (nth 1 bb))
-                       (list (nth 2 bb) (nth 3 bb))
-                       (list (cons 0 "INSERT")))))
+                 (list "X" (list (cons 0 "INSERT")))))
       (if (and ss (not (vl-catch-all-error-p ss)))
         (progn
           (setq i (sslength ss))
@@ -3682,10 +3681,52 @@
             (setq i (1- i)
                   e (ssname ss i)
                   ed (entget e)
-                  nm (if ed (mark:fill-eff-name e) nil))
-            (if (mark:fill-opening-block? nm)
+                  nm (if ed (mark:fill-eff-name e) nil)
+                  eb (mark:cell-bb e))
+            (if (and (mark:fill-opening-block? nm) eb
+                     (< (nth 0 bb) (nth 2 eb))
+                     (> (nth 2 bb) (nth 0 eb))
+                     (< (nth 1 bb) (nth 3 eb))
+                     (> (nth 3 bb) (nth 1 eb)))
               (setq hit nm)))))))
   hit)
+
+(defun mark:fill-seg-touch? (a b tol / ax ay az bx by bz)
+  (setq ax (list (nth 0 a) (nth 1 a))
+        ay (list (nth 2 a) (nth 3 a))
+        bx (list (nth 0 b) (nth 1 b))
+        by (list (nth 2 b) (nth 3 b)))
+  (or (<= (distance (list (car ax) (cadr ax) 0.0)
+                    (list (car bx) (cadr bx) 0.0)) tol)
+      (<= (distance (list (car ax) (cadr ax) 0.0)
+                    (list (car by) (cadr by) 0.0)) tol)
+      (<= (distance (list (car ay) (cadr ay) 0.0)
+                    (list (car bx) (cadr bx) 0.0)) tol)
+      (<= (distance (list (car ay) (cadr ay) 0.0)
+                    (list (car by) (cadr by) 0.0)) tol)))
+
+(defun mark:fill-seg-components (segs / rest comps seed group changed out s g hit)
+  ;; Разделяем разорванные витражи до построения осей.
+  (setq rest segs comps nil)
+  (while rest
+    (setq seed (car rest)
+          rest (cdr rest)
+          group (list seed)
+          changed t)
+    (while changed
+      (setq changed nil out nil)
+      (foreach s rest
+        (setq hit nil)
+        (foreach g group
+          (if (mark:fill-seg-touch? s g *mark:fill-tol*)
+            (setq hit t)))
+        (if hit
+          (progn (setq group (cons s group) changed t))
+          (setq out (cons s out))))
+      (setq rest (reverse out)))
+    (setq comps (cons group comps)))
+  (reverse comps))
+
 
 (defun mark:fill-add (cells pts bb / x0 y0 x1 y1 w h dup p opening)
   (if (null bb)
@@ -3800,7 +3841,7 @@
                     ", отрезков: " (itoa (length out))))
   out)
 
-(defun mark:fill-mode-all-grid (cells pts / ss segs r bb)
+(defun mark:fill-mode-all-grid (cells pts / ss segs r bb comps comp ncomp total)
   (mark:out "5-Сетка-все-типы: блоки, линии, полилинии и мультилинии.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
   (setq ss (mark:fill-all-ss))
@@ -3812,15 +3853,20 @@
       (if (null segs)
         (list cells pts)
         (progn
-          (setq r (mark:fill-segs->cells segs))
-          (mark:out (strcat "[INFO] Универсальная сетка: осей X "
-                            (itoa (cadr r)) " Y " (itoa (caddr r))
-                            ", ячеек " (itoa (length (car r)))))
-          (foreach bb (car r)
-            (setq r (mark:fill-add cells pts bb)
-                  cells (car r) pts (cadr r)))
-          (list cells pts))))))
-
+          (setq comps (mark:fill-seg-components segs)
+                ncomp (length comps)
+                total 0)
+          (foreach comp comps
+            (setq r (mark:fill-segs->cells comp))
+            (foreach bb (car r)
+              (if (mark:fill-box-closed comp bb)
+                (progn
+                  (setq r (mark:fill-add cells pts bb)
+                        cells (car r) pts (cadr r)
+                        total (1+ total)))))
+          (mark:out (strcat "[INFO] Универсальная сетка: компонентов "
+                            (itoa ncomp) ", ячеек " (itoa total)))
+          (list cells pts)))))))
 (defun mark:fill-all-near-ss (pt win / p0 p1 filter ss ins out i)
   (setq p0 (list (- (car pt) win) (- (cadr pt) win))
         p1 (list (+ (car pt) win) (+ (cadr pt) win))
@@ -3860,7 +3906,10 @@
         (progn
           (mark:fill-type-stat ss)
           (setq segs (mark:fill-all-segs ss)
-                r (mark:fill-try-segs segs pt cells pts))
+                r nil)
+          (foreach comp (mark:fill-seg-components segs)
+            (if (null r)
+              (setq r (mark:fill-try-segs comp pt cells pts))))
           (if r r (list cells pts)))))))
 
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
