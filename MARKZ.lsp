@@ -3666,9 +3666,22 @@
   (or (wcmatch u "*КН*")
       (wcmatch u "*ДВЕР*")))
 
-(defun mark:fill-load-openings (/ ss i e ed nm p out)
-  ;; Быстрый фильтр: точка вставки окна/двери должна попасть в ячейку.
-  ;; Геометрию проёмов здесь не разбираем, чтобы не запускать динамический анализ.
+(defun mark:fill-vla-bb (e / obj mn mx r a b)
+  (setq obj (mark:vla e)
+        mn nil mx nil
+        r (if obj
+            (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'mn 'mx))
+            nil))
+  (if (and r (not (vl-catch-all-error-p r)) mn mx)
+    (progn
+      (setq a (vlax-safearray->list mn)
+            b (vlax-safearray->list mx))
+      (list (car a) (cadr a) (car b) (cadr b)))
+    nil))
+
+(defun mark:fill-load-openings (/ ss i e ed nm eb out)
+  ;; Реальные габариты проёмов получаем напрямую через VLA, без разбора
+  ;; динамической геометрии и без побочных повторных расчётов.
   (setq out nil
         ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT")))))
   (if (and ss (not (vl-catch-all-error-p ss)))
@@ -3678,25 +3691,28 @@
         (setq i (1- i)
               e (ssname ss i)
               ed (entget e)
-              nm (if ed (mark:fill-eff-name e) nil)
-              p (if ed (cdr (assoc 10 ed)) nil))
-        (if (and (mark:fill-opening-block? nm) p)
-          (setq out (cons (list nm (list p p)) out))))))
+              nm (if ed (mark:fill-eff-name e) nil))
+        (if (mark:fill-opening-block? nm)
+          (progn
+            (setq eb (mark:fill-vla-bb e))
+            (if eb (setq out (cons (list nm eb) out))))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
   (mark:out (strcat "[INFO] Проёмов для фильтра: " (itoa (length out))))
   out)
 
-(defun mark:fill-cell-opening? (bb / hit item eb p)
+
+(defun mark:fill-cell-opening? (bb / hit item eb)
   (if (and bb (not *mark:opening-loaded*))
     (mark:fill-load-openings))
   (setq hit nil)
   (foreach item *mark:opening-bbs*
-    (setq eb (cadr item)
-          p (car eb))
-    (if (and (null hit) p
-             (>= (car p) (nth 0 bb)) (<= (car p) (nth 2 bb))
-             (>= (cadr p) (nth 1 bb)) (<= (cadr p) (nth 3 bb)))
+    (setq eb (cadr item))
+    (if (and (null hit) eb
+             (< (nth 0 bb) (nth 2 eb))
+             (> (nth 2 bb) (nth 0 eb))
+             (< (nth 1 bb) (nth 3 eb))
+             (> (nth 3 bb) (nth 1 eb)))
       (setq hit (car item))))
   hit)
 
@@ -3925,7 +3941,11 @@
       (if segs
         (progn
           (setq r (mark:fill-segs->cells segs))
-          (foreach bb (car r) (setq all-bb (cons bb all-bb)))))
+          ;; Не принимаем прямоугольник только по совпадению осей:
+          ;; все четыре стороны должны реально закрываться сегментами.
+          (foreach bb (car r)
+            (if (mark:fill-box-closed segs bb)
+              (setq all-bb (cons bb all-bb))))))
       (mark:out (strcat "[INFO] Универсальная сетка: блоковых ячеек "
                         (itoa (length block-cells))))
       (mark:out (strcat "[INFO] Универсальная сетка: всего кандидатов "
@@ -3990,12 +4010,12 @@
                (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
                (if (and r (not (vl-catch-all-error-p r)))
                  (setq lsegs (append r lsegs)))))
-          (setq r (if bsegs (mark:fill-try-segs bsegs pt cells pts) nil))
-          (if (null r)
+          ;; Сначала используем проверенную старую точку-динамику.
+          (setq r (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts))
+          (if (or (null r) (null (car r)))
+            (setq r (if bsegs (mark:fill-try-segs bsegs pt cells pts) nil)))
+          (if (or (null r) (null (car r)))
             (setq r (if lsegs (mark:fill-try-segs lsegs pt cells pts) nil)))
-          ;; Последний fallback — проверенная логика старой точки-динамики.
-          (if (null r)
-            (setq r (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts)))
           (if r r (list cells pts))))))))
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
   (mark:out "Тыкайте в границы ячеек (замкнутые полилинии и т.п.).")
