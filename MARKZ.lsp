@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 43")
+(setq *mark:rev*    "Ред. 44")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3841,32 +3841,52 @@
                     ", отрезков: " (itoa (length out))))
   out)
 
-(defun mark:fill-mode-all-grid (cells pts / ss segs r bb comps comp ncomp total)
+(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks all-bb bb)
   (mark:out "5-Сетка-все-типы: блоки, линии, полилинии и мультилинии.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
-  (setq ss (mark:fill-all-ss))
+  (setq ss (mark:fill-all-ss)
+        segs nil
+        blocks nil)
   (if (null ss)
     (list cells pts 'cancel)
     (progn
       (mark:fill-type-stat ss)
-      (setq segs (mark:fill-all-segs ss))
-      (if (null segs)
-        (list cells pts)
+      (setq i (sslength ss))
+      (while (> i 0)
+        (setq i (1- i)
+              e (ssname ss i)
+              ed (entget e)
+              typ (if ed (cdr (assoc 0 ed)) nil))
+        (cond
+          ((= typ "INSERT")
+           (setq nm (mark:fill-eff-name e))
+           (if (and (not (mark:fill-skip-block? nm))
+                    (not (mark:fill-opening-block? nm)))
+             (setq blocks (cons (list 0.0 e) blocks))))
+          ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
+           (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+           (if (and r (not (vl-catch-all-error-p r)))
+             (setq segs (append r segs)))))
+      (setq all-bb nil)
+      ;; Динамические блоки обрабатываются ровно старым 3-Сетка-динамика.
+      (if blocks
         (progn
-          (setq comps (mark:fill-seg-components segs)
-                ncomp (length comps)
-                total 0)
-          (foreach comp comps
-            (setq r (mark:fill-segs->cells comp))
-            (foreach bb (car r)
-              (if (mark:fill-box-closed comp bb)
-                (progn
-                  (setq r (mark:fill-add cells pts bb)
-                        cells (car r) pts (cadr r)
-                        total (1+ total)))))
-          (mark:out (strcat "[INFO] Универсальная сетка: компонентов "
-                            (itoa ncomp) ", ячеек " (itoa total)))
-          (list cells pts)))))))
+          (setq r (mark:fill-closed-cells blocks))
+          (foreach bb r (setq all-bb (cons bb all-bb)))))
+      ;; Линии и MLINE обрабатываются ровно старым Сетка-мультилинии.
+      (if segs
+        (progn
+          (setq r (mark:fill-segs->cells segs))
+          (foreach bb (car r) (setq all-bb (cons bb all-bb)))))
+      (mark:out (strcat "[INFO] Универсальная сетка: блоковых ячеек "
+                        (itoa (length (if blocks (mark:fill-closed-cells blocks) nil)))))
+      (mark:out (strcat "[INFO] Универсальная сетка: всего кандидатов "
+                        (itoa (length all-bb))))
+      (foreach bb all-bb
+        (setq r (mark:fill-add cells pts bb)
+              cells (car r)
+              pts (cadr r)))
+      (list cells pts)))))
 (defun mark:fill-all-near-ss (pt win / p0 p1 filter ss ins out i)
   (setq p0 (list (- (car pt) win) (- (cadr pt) win))
         p1 (list (+ (car pt) win) (+ (cadr pt) win))
@@ -3884,7 +3904,7 @@
           (ssadd (ssname ins i) out)))))
   out)
 
-(defun mark:fill-mode-all-point (cells pts / pt win ss segs r)
+(defun mark:fill-mode-all-point (cells pts / pt win ss i e ed typ nm r bsegs lsegs segs)
   (setq pt (getpoint "\n6-Точка-все-типы: укажите точку внутри ячейки <Enter>: "))
   (if (null pt)
     (list cells pts 'cancel)
@@ -3893,25 +3913,39 @@
                          (> *mark:fill-window* 0.0))
                   *mark:fill-window* 5000.0)
             pt (mark:fill-pt-wcs pt)
-            ss (mark:fill-all-near-ss pt win))
+            ss (mark:fill-all-near-ss pt win)
+            bsegs nil
+            lsegs nil)
       (if (null ss)
         (progn
           (setq win (* win 4.0)
                 ss (mark:fill-all-near-ss pt win)))
         nil)
       (if (null ss)
+        (list cells pts)
         (progn
-          (mark:out "[WARN] Рядом с точкой не найдены объекты каркаса.")
-          (list cells pts))
-        (progn
-          (mark:fill-type-stat ss)
-          (setq segs (mark:fill-all-segs ss)
-                r nil)
-          (foreach comp (mark:fill-seg-components segs)
-            (if (null r)
-              (setq r (mark:fill-try-segs comp pt cells pts))))
-          (if r r (list cells pts)))))))
-
+          (setq i (sslength ss))
+          (while (> i 0)
+            (setq i (1- i)
+                  e (ssname ss i)
+                  ed (entget e)
+                  typ (if ed (cdr (assoc 0 ed)) nil))
+            (cond
+              ((= typ "INSERT")
+               (setq nm (mark:fill-eff-name e))
+               (if (and (not (mark:fill-skip-block? nm))
+                        (not (mark:fill-opening-block? nm)))
+                 (progn
+                   (setq r (mark:fill-segs-of-ins e))
+                   (if r (setq bsegs (append r bsegs))))))
+              ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
+               (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+               (if (and r (not (vl-catch-all-error-p r)))
+                 (setq lsegs (append r lsegs)))))
+          (setq r (if bsegs (mark:fill-try-segs bsegs pt cells pts) nil))
+          (if (null r)
+            (setq r (if lsegs (mark:fill-try-segs lsegs pt cells pts) nil)))
+          (if r r (list cells pts))))))))
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
   (mark:out "Тыкайте в границы ячеек (замкнутые полилинии и т.п.).")
   (mark:out "Enter — конец выбора.")
