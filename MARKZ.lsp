@@ -104,7 +104,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 44")
+(setq *mark:rev*    "–ед. 45")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3695,6 +3695,9 @@
         (if (mark:fill-opening-block? nm)
           (progn
             (setq eb (mark:fill-vla-bb e))
+            ;; ” динамических INSERT VLA-г-абарит может быть недоступен.
+            ;; –езерв Ч существующий расчЄт габарита сущности.
+            (if (null eb) (setq eb (mark:cell-bb e)))
             (if eb (setq out (cons (list nm eb) out))))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
