@@ -3661,13 +3661,14 @@
 ;;; ---- список ячеек + дедуп --------------------------------------------
 
 
-;; Маски имён проёмов (окна/двери). По EffectiveName блока.
-;; Реальные имена в проекте: окно «КПТ60», дверь «...КПТ74...», а также
-;; общепринятые «ОКНО», «створка», «ДВЕРЬ». Заполнения («Кассета» и т.п.)
-;; под маски не попадают. Список можно дополнять без правки кода.
+;; Маски имён проёмов (окна/двери) по EffectiveName блока.
+;; По умолчанию: «ОКНО», «створка», «ДВЕРЬ». Профильные заполнения
+;; («Кассета» и т.п.) под эти маски не попадают. Список можно дополнять
+;; прямо в чертеже, без правки кода:
+;;   (setq *mark:opening-masks* (append *mark:opening-masks* (list "*КПТ*")))
 (if (null *mark:opening-masks*)
   (setq *mark:opening-masks*
-    (list "*ОКН*" "*СТВОР*" "*ДВЕР*" "*КПТ*")))
+    (list "*ОКН*" "*СТВОР*" "*ДВЕР*")))
 
 ;; Маски-исключения: имена, которые НЕ считать проёмом, даже если они
 ;; случайно совпали с маской выше (например, глухие заполнения).
@@ -3778,18 +3779,23 @@
   out)
 
 
-(defun mark:fill-cell-opening? (bb / hit item eb)
+(defun mark:fill-cell-opening? (bb / hit item eb cx cy)
+  ;; Ячейка считается занятой проёмом, если ЦЕНТР ячейки попадает внутрь
+  ;; габарита окна/двери. Так проём захватывает только ту ячейку, в которой
+  ;; он реально стоит, а не соседние из-за небольшого «залезания» рамки.
   (if (and bb (not *mark:opening-loaded*))
     (mark:fill-load-openings))
   (setq hit nil)
-  (foreach item *mark:opening-bbs*
-    (setq eb (cadr item))
-    (if (and (null hit) eb
-             (< (nth 0 bb) (nth 2 eb))
-             (> (nth 2 bb) (nth 0 eb))
-             (< (nth 1 bb) (nth 3 eb))
-             (> (nth 3 bb) (nth 1 eb)))
-      (setq hit (car item))))
+  (if bb
+    (progn
+      (setq cx (/ (+ (nth 0 bb) (nth 2 bb)) 2.0)
+            cy (/ (+ (nth 1 bb) (nth 3 bb)) 2.0))
+      (foreach item *mark:opening-bbs*
+        (setq eb (cadr item))
+        (if (and (null hit) eb
+                 (>= cx (nth 0 eb)) (<= cx (nth 2 eb))
+                 (>= cy (nth 1 eb)) (<= cy (nth 3 eb)))
+          (setq hit (car item))))))
   hit)
 
 
