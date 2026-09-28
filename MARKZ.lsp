@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 47.4")
+(setq *mark:rev*    "Ред. 47.5")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -212,6 +212,13 @@
           (substr "                                  " 1
                   (max 1 (- 36 (strlen label))))
           value))
+
+;; Выравнивание вправо: колонки лога «ячейка/вставка» стоят ровно.
+(defun mark:rjust (s w / d)
+  (setq d (- w (strlen s)))
+  (if (> d 0)
+    (strcat (substr "                            " 1 d) s)
+    s))
 
 ;; Печать списка строк с ограничением *mark:max-err-lines*
 (defun mark:print-limited (lines / total shown)
@@ -4907,6 +4914,82 @@
                                 pts   (cadr r))
                           (list cells pts))))))))))))))
 
+;;; ---- замкнутость ячеек сетки мультилиний ----------------------------
+;; Ячейка нужна только в замкнутом контуре: стойки на обеих осях
+;; перекрывают её по высоте целиком, ригели сверху и снизу — по ширине
+;; (стыки ригелей в допуск схлопываются). Иначе заполнение прилипает к
+;; разорванному/незамкнутому участку между мультилиниями: например, к
+;; линии парапета, до которой стойки не доходят, — и после объединения
+;; Т-стыков получается одна огромная ячейка на весь разрыв.
+
+;; Каркас для проверок: стойки (ось y0 y1), ригели (ось x0 x1).
+(defun mark:fill-frame-vh (segs / v h s a b c d)
+  (setq v nil
+        h nil)
+  (foreach s segs
+    (setq a (min (float (nth 0 s)) (float (nth 2 s)))
+          b (max (float (nth 0 s)) (float (nth 2 s)))
+          c (min (float (nth 1 s)) (float (nth 3 s)))
+          d (max (float (nth 1 s)) (float (nth 3 s))))
+    (cond
+      ((eq (mark:fill-axis s) 'v)
+       (setq v (cons (list (/ (+ a b) 2.0) c d) v)))
+      ((eq (mark:fill-axis s) 'h)
+       (setq h (cons (list (/ (+ c d) 2.0) a b) h)))))
+  (list v h))
+
+;; Есть ли на оси ax стойка, перекрывающая высоту [lo..hi] целиком.
+(defun mark:fill-post-covers (posts ax lo hi / it hit)
+  (setq hit nil)
+  (foreach it posts
+    (if (and (null hit)
+             (<= (abs (- (nth 0 it) ax)) (+ (* 2.0 *mark:fill-tol*) 10.0))
+             (<= (nth 1 it) (+ lo *mark:fill-tol*))
+             (>= (nth 2 it) (- hi *mark:fill-tol*)))
+      (setq hit t)))
+  hit)
+
+;; Закрывают ли ригели оси ay просвет [lo..hi] по ширине (стыки в допуск).
+(defun mark:fill-rail-covers (rails ay lo hi / spans it)
+  (setq spans nil)
+  (foreach it rails
+    (if (<= (abs (- (nth 0 it) ay)) (+ *mark:fill-tol* 25.0))
+      (setq spans (cons (list (nth 1 it) (nth 2 it)) spans))))
+  (mark:fill-covers spans lo hi *mark:fill-tol*))
+
+;; Прогон ячеек сетки: шире/выше предела — разрыв между участками;
+;; без полного перекрытия сторон — незамкнутый контур, заполнение не ставим.
+(defun mark:fill-grid-valid (cells segs / vh posts rails out cell
+                                    ax0 ay0 ax1 ay1 cw ch n-gap n-open)
+  (setq vh     (mark:fill-frame-vh segs)
+        posts  (car vh)
+        rails  (cadr vh)
+        out    nil
+        n-gap  0
+        n-open 0)
+  (foreach cell cells
+    ;; ячейка хранит внутренний контур: ось профиля = грань +- 25 мм
+    (setq ax0 (- (nth 0 cell) 25.0)
+          ay0 (- (nth 1 cell) 25.0)
+          ax1 (+ (nth 2 cell) 25.0)
+          ay1 (+ (nth 3 cell) 25.0)
+          cw  (- (nth 2 cell) (nth 0 cell))
+          ch  (- (nth 3 cell) (nth 1 cell)))
+    (if (or (and (numberp *mark:fill-max-w*) (> cw *mark:fill-max-w*))
+            (and (numberp *mark:fill-max-h*) (> ch *mark:fill-max-h*)))
+      (setq n-gap (1+ n-gap))
+      (if (not (and (mark:fill-post-covers posts ax0 ay0 ay1)
+                    (mark:fill-post-covers posts ax1 ay0 ay1)
+                    (mark:fill-rail-covers rails ay0 ax0 ax1)
+                    (mark:fill-rail-covers rails ay1 ax0 ax1)))
+        (setq n-open (1+ n-open))
+        (setq out (cons cell out)))))
+  (if (> (+ n-gap n-open) 0)
+    (mark:out
+      (strcat "[INFO] Пропущено ячеек: разрыв между участками " (itoa n-gap)
+              ", незамкнутый контур " (itoa n-open) ".")))
+  (reverse out))
+
 (defun mark:fill-segs->cells (segs / xs ys sx sy x0 x1 y0 y1
                                   ix iy nxs nys out ax tmp v
                                   mx col-ys col-sy seg-x0 seg-x1 seg-y0
@@ -4986,7 +5069,8 @@
                                 out)))
               (setq iy (1+ iy)))))
         (setq ix (1+ ix)))))
-  (list (mark:fill-merge-t-cells out segs) nxs nys (length segs)))
+  (list (mark:fill-grid-valid (mark:fill-merge-t-cells out segs) segs)
+        nxs nys (length segs)))
 (defun mark:fill-merge-t-cells (cells segs / changed out a b x0a y0a x1a y1a
                                            x0b y0b x1b y1b gap mid-x my has-col rest cand merged)
   (setq out cells
@@ -5074,8 +5158,9 @@
     (progn
       (setq a nil
             b nil)
-      (setq r (vl-catch-all-apply 'vlax-invoke-method
-                 (list obj "GetBoundingBox" 'a 'b)))
+      ;; vla-форма: vlax-invoke-method не гарантирует возврат по ссылке
+      (setq r (vl-catch-all-apply 'vla-GetBoundingBox
+                 (list obj 'a 'b)))
       (if (or (vl-catch-all-error-p r) (null a) (null b))
         nil
         (progn
@@ -5124,6 +5209,38 @@
         (mark:out
           "[WARN] MLINE: далее предупреждения о вершинах не выводятся."))))
   nil)
+
+;; Фактическая полуширина мультилинии — из её габарита. Профили бывают не
+;; только 50 мм: жёсткие 25 мм по умолчанию занижают ячейку (стойка 40 мм
+;; даёт минус 5 мм с каждой стороны). Габарит берём в системе самого блока,
+;; матрица вставки затем масштабирует полуширину (mark:fill-segs-xform).
+(defun mark:fill-mline-hw (e segs / bb ax w h)
+  (setq bb (mark:fill-e-bb e)
+        ax (if segs (mark:fill-axis (car segs)) nil))
+  (if (and bb ax)
+    (progn
+      (setq w (- (nth 2 bb) (nth 0 bb))
+            h (- (nth 3 bb) (nth 1 bb)))
+      (cond
+        ;; прямая горизонтальная: толщина = высота габарита
+        ((and (eq ax 'h) (<= h (+ (* 3.0 *mark:fill-tol*) 10.0))) (/ h 2.0))
+        ;; прямая вертикальная: толщина = ширина габарита
+        ((and (eq ax 'v) (<= w (+ (* 3.0 *mark:fill-tol*) 10.0))) (/ w 2.0))
+        ;; изогнутая или крупная — как раньше, без полуширины
+        (t nil)))
+    nil))
+
+;; Отрезки мультилинии: ось из вершин, полуширина — пятым элементом.
+(defun mark:fill-mline-segs-hw (e segs / hw out s)
+  (setq hw  (mark:fill-mline-hw e segs)
+        out nil)
+  (if (null hw)
+    segs
+    (progn
+      (foreach s segs
+        (setq out
+          (cons (list (nth 0 s) (nth 1 s) (nth 2 s) (nth 3 s) hw) out)))
+      (reverse out))))
 
 (defun mark:fill-extract-segs (e / ed typ verts segs i n ang p rad
                                bb x0 y0 x1 y1 w h yc xc tol closed)
@@ -5218,7 +5335,8 @@
                                    verts))))
              (setq verts (reverse verts))))
          (if (>= (length verts) 2)
-           (setq segs (mark:fill-verts-to-segs verts nil))
+           (setq segs (mark:fill-mline-segs-hw
+                         e (mark:fill-verts-to-segs verts nil)))
            (progn
              (setq bb (mark:fill-e-bb e))
              (if (null bb)
@@ -5409,11 +5527,14 @@
       (setq out (cons it out))))
   out)
 
-(defun mark:fill-owned-axes (hits / i n vs hs part s x0 y0 x1 y1 dx dy ln hw nm ed)
+(defun mark:fill-owned-axes (hits / i n vs hs part s x0 y0 x1 y1 dx dy ln hw nm ed
+                                 hwmin hwmax)
   (setq i 0
         n (length hits)
         vs nil
         hs nil
+        hwmin nil
+        hwmax nil
         *mark:line-vis* 0
         *mark:expl-n* 0
         *mark:def-n* 0
@@ -5448,6 +5569,10 @@
           (setq hw (if (and (> (length s) 4) (numberp (nth 4 s)))
                      (float (nth 4 s))
                      25.0))
+          (if (and (> (length s) 4) (numberp (nth 4 s)) (> (float (nth 4 s)) 0.0))
+            (progn
+              (if (or (null hwmin) (< hw hwmin)) (setq hwmin hw))
+              (if (or (null hwmax) (> hw hwmax)) (setq hwmax hw))))
           (cond
             ((<= dy (* *mark:fill-slope* ln))
              (setq hs (cons (list (/ (+ (float (nth 1 s)) (float (nth 3 s))) 2.0)
@@ -5486,6 +5611,12 @@
             (if (and (numberp *mark:line-vis*) (> *mark:line-vis* 0))
               (strcat ". Видимых блоков из линий: " (itoa *mark:line-vis*)
                       ", отступ 0")
+              "")
+            (if (and hwmin hwmax (numberp *mark:def-n*) (> *mark:def-n* 0))
+              (strcat "; полуширина мультилиний " (rtos hwmin 2 1)
+                      (if (< hwmin hwmax)
+                        (strcat ".." (rtos hwmax 2 1))
+                        ""))
               "")))
   (list vs hs))
 
@@ -5702,13 +5833,13 @@
                 (if (and (not (vl-catch-all-error-p ins)) ins)
                   (setq lst (cons ins lst)))
                 (mark:out
-                  (strcat "  ячейка " (itoa n)
-                          ": " (rtos x0 2 4) "," (rtos y0 2 4)
-                          "  W=" (rtos w 2 0)
-                          "  H=" (rtos h 2 0)
-                          " ||| вставка " (itoa n)
-                          ": W=" (rtos w 2 0)
-                          "  H=" (rtos h 2 0))))))
+                  (strcat "  ячейка " (mark:rjust (itoa n) 3)
+                          ": " (mark:rjust (rtos x0 2 4) 12) "," (mark:rjust (rtos y0 2 4) 12)
+                          "  W=" (mark:rjust (rtos w 2 0) 5)
+                          "  H=" (mark:rjust (rtos h 2 0) 5)
+                          " ||| вставка " (mark:rjust (itoa n) 3)
+                          ": W=" (mark:rjust (rtos w 2 0) 5)
+                          "  H=" (mark:rjust (rtos h 2 0) 5))))))
           (setq t1 (getvar "MILLISECS")
                 t_ins (/ (- t1 t0) 1000.0))
           (if (and doc (not *mark:batch-undo*) (not *mark:fill-undo-off*))
