@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 47.5")
+(setq *mark:rev*    "Ред. 47.6")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -118,6 +118,7 @@
 (setq *mark:vis-n* 0)
 (setq *mark:hid-n* 0)
 (setq *mark:vis-open* 0)
+(setq *mark:dyn-open-skip* 0)
 
 (defun mark:reset-state ()
   (setq *mark:dyn-cache*    nil
@@ -3787,15 +3788,17 @@
               (progn
                 ;; Тройка: имя проёма, габарит, ename блока (для подсветки).
                 (setq out (cons (list nm eb e) out))
-                ;; Логируем параметры окон/дверей, попавших в зону сетки.
-                (mark:out
-                  (strcat "[INFO] Проём: " (if nm nm "?")
-                          "  X " (rtos (nth 0 eb) 2 1)
-                          ".." (rtos (nth 2 eb) 2 1)
-                          "  Y " (rtos (nth 1 eb) 2 1)
-                          ".." (rtos (nth 3 eb) 2 1)
-                          "  W=" (rtos (- (nth 2 eb) (nth 0 eb)) 2 0)
-                          "  H=" (rtos (- (nth 3 eb) (nth 1 eb)) 2 0))))))))))
+                ;; Полный список проёмов печатаем только в режимах сетки,
+                ;; где известна зона; в «Точка/Полилиния» хватает счётчика.
+                (if *mark:grid-zone*
+                  (mark:out
+                    (strcat "[INFO] Проём: " (if nm nm "?")
+                            "  X " (rtos (nth 0 eb) 2 1)
+                            ".." (rtos (nth 2 eb) 2 1)
+                            "  Y " (rtos (nth 1 eb) 2 1)
+                            ".." (rtos (nth 3 eb) 2 1)
+                            "  W=" (rtos (- (nth 2 eb) (nth 0 eb)) 2 0)
+                            "  H=" (rtos (- (nth 3 eb) (nth 1 eb)) 2 0)))))))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
   (mark:out (strcat "[INFO] Проёмов для фильтра: " (itoa (length out))))
@@ -4673,7 +4676,8 @@
         (setq i (1- i)
               e (ssname ss i)
               nm (mark:fill-eff-name e))
-        (if (not (mark:fill-skip-block? nm))
+        (if (and (not (mark:fill-skip-block? nm))
+                 (not (mark:fill-opening-block? nm)))
           (progn
             (setq d (mark:fill-bb-dist pt e))
             (if (<= d win)
@@ -4698,11 +4702,12 @@
   (setq *mark:dyn-quiet* nil)
   segs)
 
-(defun mark:fill-pick-frame (/ ss i e nm hits)
+(defun mark:fill-pick-frame (/ ss i e nm hits n-open)
   (mark:out "[INFO] Выберите стойки и ригели рамкой. Enter — пропуск.")
   (setq ss (vl-catch-all-apply 'ssget
              (list (list (cons 0 "INSERT")))))
-  (setq hits nil)
+  (setq hits nil
+        n-open 0)
   (if (and ss (not (vl-catch-all-error-p ss)))
     (progn
       (setq i (sslength ss))
@@ -4710,8 +4715,18 @@
         (setq i (1- i)
               e (ssname ss i)
               nm (mark:fill-eff-name e))
-        (if (not (mark:fill-skip-block? nm))
-          (setq hits (cons (list 0.0 e) hits))))))
+        (cond
+          ((mark:fill-skip-block? nm) nil)
+          ;; Окно/дверь — заполнение, не каркас: линии рамы заходят
+          ;; в световой проём (нахлёст) и занижают ячейку. Каркас —
+          ;; только стойки, ригели и направляющие.
+          ((mark:fill-opening-block? nm)
+           (setq n-open (1+ n-open)))
+          (t (setq hits (cons (list 0.0 e) hits)))))))
+  (if (> n-open 0)
+    (mark:out
+      (strcat "[INFO] Блоков проёма в выборе пропущено: " (itoa n-open)
+              " — окно/дверь не каркас.")))
   (if hits
     (mark:fill-hit-report hits))
   hits)
@@ -4741,7 +4756,8 @@
     (setq i (1- i)
           e (ssname ss i)
           nm (mark:fill-eff-name e))
-    (if (not (mark:fill-skip-block? nm))
+    (if (and (not (mark:fill-skip-block? nm))
+             (not (mark:fill-opening-block? nm)))
       (setq hits (cons (list (mark:fill-bb-dist pt e) e) hits))))
   hits)
 
@@ -6254,12 +6270,13 @@
     (mark:fill-ins-dist pt e)
     (mark:fill-bb-dist pt e)))
 
-(defun mark:fill-dyn-candidates (pt win / ss i e nm d hits)
+(defun mark:fill-dyn-candidates (pt win / ss i e nm d hits n-open)
   (mark:out
     (strcat "[INFO] Ищу вставки в пределах " (rtos win 2 0) " мм…"))
   (setq ss (vl-catch-all-apply 'ssget
              (list "X" (list (cons 0 "INSERT"))))
-        hits nil)
+        hits nil
+        n-open 0)
   (if (and ss (not (vl-catch-all-error-p ss)))
     (progn
       (setq i (sslength ss))
@@ -6267,11 +6284,16 @@
         (setq i (1- i)
               e (ssname ss i)
               nm (mark:fill-eff-name e))
-        (if (not (mark:fill-skip-block? nm))
-          (progn
-            (setq d (mark:fill-hit-rank pt e))
-            (if (<= d win)
-              (setq hits (cons (list d e) hits))))))))
+        (cond
+          ((mark:fill-skip-block? nm) nil)
+          ;; Окно/дверь — заполнение, не каркас (как в Сетке-динамика).
+          ((mark:fill-opening-block? nm)
+           (setq n-open (1+ n-open)))
+          (t
+           (setq d (mark:fill-hit-rank pt e))
+           (if (<= d win)
+             (setq hits (cons (list d e) hits))))))))
+  (setq *mark:dyn-open-skip* n-open)
   (vl-sort hits '(lambda (a b) (< (car a) (car b)))))
 
 (defun mark:fill-bb-area (e / bb)
@@ -6299,7 +6321,12 @@
             hits (mark:fill-dyn-pick all))
       (mark:out
         (strcat "[INFO] В пределах 6000 мм: " (itoa (length all))
-                ", беру " (itoa (length hits))))
+                ", беру " (itoa (length hits))
+                (if (and (numberp *mark:dyn-open-skip*)
+                         (> *mark:dyn-open-skip* 0))
+                  (strcat "; проёмов пропущено: "
+                          (itoa *mark:dyn-open-skip*))
+                  "")))
       (mark:fill-hit-report hits)
       (setq r (mark:fill-dyn-from hits ptw cells pts))))
   (if r
