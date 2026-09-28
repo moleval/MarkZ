@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 47.3")
+(setq *mark:rev*    "Ред. 47.4")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3903,11 +3903,6 @@
             (progn
               (setq cells (cons bb cells)
                     pts   (cons (list x0 y0) pts))
-              (mark:out
-                (strcat "  ячейка " (itoa (length cells))
-                        ": " (rtos x0 2 4) "," (rtos y0 2 4)
-                        "  W=" (rtos w 2 4)
-                        "  H=" (rtos h 2 4)))
               (list cells pts))))))))
 
 ;;; ---- вершины / точка в полигоне --------------------------------------
@@ -5707,9 +5702,12 @@
                 (if (and (not (vl-catch-all-error-p ins)) ins)
                   (setq lst (cons ins lst)))
                 (mark:out
-                  (strcat "  вставка " (itoa n)
+                  (strcat "  ячейка " (itoa n)
                           ": " (rtos x0 2 4) "," (rtos y0 2 4)
                           "  W=" (rtos w 2 0)
+                          "  H=" (rtos h 2 0)
+                          " ||| вставка " (itoa n)
+                          ": W=" (rtos w 2 0)
                           "  H=" (rtos h 2 0))))))
           (setq t1 (getvar "MILLISECS")
                 t_ins (/ (- t1 t0) 1000.0))
