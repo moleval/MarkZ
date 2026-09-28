@@ -6443,6 +6443,27 @@
           i (1+ i)))
   n)
 
+(defun mark:copy-key-generic (e / ed out code val)
+  ;; Полный ключ для любого примитива: все DXF-коды, кроме служебных
+  ;; (дескриптор, владелец, реакторы). Копией считается только полностью
+  ;; идентичный объект (тип, слой, цвет, геометрия и т.д.).
+  (setq ed (entget e) out "")
+  (foreach pair ed
+    (setq code (car pair) val (cdr pair))
+    (if (not (member code '(-1 -2 5 330 331 350 360 361 102 100 92 310)))
+      (setq out
+        (strcat out "|" (itoa code) ":"
+          (cond ((mark:strp val) val)
+                ((numberp val) (rtos (float val) 2 4))
+                ((listp val)
+                 (apply 'strcat
+                   (mapcar '(lambda (x)
+                      (if (numberp x) (strcat "," (rtos (float x) 2 4))
+                                      (strcat "," (vl-princ-to-string x))))
+                           val)))
+                (t (vl-princ-to-string val)))))))
+  out)
+
 (defun mark:copy-dyn-key (e / obj pairs parts pair nm val)
   ;; Строка из всех динамических свойств (включая Видимость), чтобы
   ;; копией считался только полностью идентичный блок.
@@ -6467,24 +6488,33 @@
       (setq parts (vl-sort parts '(lambda (a b) (< a b))))
       (apply 'strcat (mapcar '(lambda (x) (strcat "|" x)) parts)))))
 
-(defun mark:copy-key (e / ed p nm rot sx sy)
-  (setq ed (entget e)
-        p (if ed (cdr (assoc 10 ed)) nil)
-        nm (mark:fill-eff-name e))
-  (if (or (null p) (null (car p)) (mark:fill-skip-block? nm))
-    nil
-    (progn
-      (setq rot (cdr (assoc 50 ed))
-            sx (cdr (assoc 41 ed))
-            sy (cdr (assoc 42 ed)))
-      (strcat (if nm nm "?")
-              "|" (rtos (float (car p)) 2 2)
-              "|" (rtos (float (cadr p)) 2 2)
-              "|" (rtos (if (numberp rot) rot 0.0) 2 4)
-              "|" (rtos (if (numberp sx) sx 1.0) 2 4)
-              "|" (rtos (if (numberp sy) sy 1.0) 2 4)
-              ;; полное совпадение динамики, включая Видимость
-              (mark:copy-dyn-key e)))))
+(defun mark:copy-key (e / ed typ p nm rot sx sy)
+  ;; Для вставок блоков — имя + точка + поворот + масштаб + вся динамика
+  ;; (включая Видимость). Для остальных примитивов — полный DXF-ключ.
+  (setq ed  (entget e)
+        typ (if ed (cdr (assoc 0 ed)) nil))
+  (cond
+    ((null ed) nil)
+    ((= typ "INSERT")
+     (setq p  (cdr (assoc 10 ed))
+           nm (mark:fill-eff-name e))
+     (if (or (null p) (null (car p)) (mark:fill-skip-block? nm))
+       nil
+       (progn
+         (setq rot (cdr (assoc 50 ed))
+               sx  (cdr (assoc 41 ed))
+               sy  (cdr (assoc 42 ed)))
+         (strcat "INSERT|" (if nm nm "?")
+                 "|" (rtos (float (car p)) 2 2)
+                 "|" (rtos (float (cadr p)) 2 2)
+                 "|" (rtos (if (numberp rot) rot 0.0) 2 4)
+                 "|" (rtos (if (numberp sx) sx 1.0) 2 4)
+                 "|" (rtos (if (numberp sy) sy 1.0) 2 4)
+                 ;; полное совпадение динамики, включая Видимость
+                 (mark:copy-dyn-key e)))))
+    (t
+     ;; Любой другой примитив: полный ключ по DXF-кодам.
+     (strcat typ (mark:copy-key-generic e)))))
 
 (defun mark:copies-group-name ()
   ;; Уникальное имя, чтобы не конфликтовать с существующей группой.
@@ -6518,21 +6548,22 @@
             nil))))))
 
 (defun c:МАРКАЗАПКОПИИ (/ ss i e key acc groups g keep n extras ss2 grp)
-  ;; Ручной поиск по команде пользователя. Копии чтения каркаса лежат на
-  ;; оригинале. Команда собирает лишние вставки в группу и подсвечивает их,
-  ;; НО ничего не удаляет — решение об удалении принимает пользователь.
+  ;; Ручной поиск по команде пользователя. Ищет полностью идентичные дубли
+  ;; ЛЮБЫХ примитивов (тип, слой, цвет, геометрия, для блоков — ещё и вся
+  ;; динамика, включая Видимость). Команда собирает лишние копии в группу и
+  ;; подсвечивает их, НО ничего не удаляет — решение принимает пользователь.
   ;; Внутренние процедуры, которым нужно создавать/удалять такие элементы,
   ;; работают отдельно и этой командой не затрагиваются.
-  (mark:out "МАРКАЗАПКОПИИ — найти копии блоков с одной точкой вставки.")
-  (setq ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT"))))
+  (mark:out "МАРКАЗАПКОПИИ — найти полностью идентичные дубли объектов (все примитивы).")
+  (setq ss (vl-catch-all-apply 'ssget (list "X"))
         acc nil
         extras nil
         n 0)
   (if (or (vl-catch-all-error-p ss) (null ss))
-    (mark:out "[INFO] Вставок нет.")
+    (mark:out "[INFO] Объектов нет.")
     (progn
       (setq i (sslength ss))
-      (mark:out (strcat "[INFO] Вставок в чертеже: " (itoa i)))
+      (mark:out (strcat "[INFO] Объектов в чертеже: " (itoa i)))
       (repeat i
         (setq i (1- i)
               e (ssname ss i)
@@ -6615,6 +6646,73 @@
     (setq dir ""))
   (strcat dir "MARKZ_SNAPSHOT.txt"))
 
+(defun mark:diag-name (e / obj nm2 nm raw)
+  (setq raw (cdr (assoc 2 (entget e)))
+        obj (vl-catch-all-apply 'vlax-ename->vla-object (list e))
+        nm  (if (and obj (not (vl-catch-all-error-p obj)))
+              (mark:ax-get obj "EffectiveName")
+              nil))
+  (list (if (mark:strp nm) nm "<нет EffectiveName>")
+        (if (mark:strp raw) raw "?")))
+
+(defun c:МАРКАДИАГ (/ p ss i e ed ip d best bd names nm raw match eb)
+  ;; Диагностика: указать точку у окна/двери — покажет ближайшие вставки,
+  ;; их EffectiveName, имя блока и распознаётся ли блок как проём.
+  (mark:out "МАРКАДИАГ — укажите точку рядом с окном/дверью.")
+  (setq p (getpoint "\nТочка у проёма: "))
+  (if (null p)
+    (mark:out "[INFO] Отменено.")
+    (progn
+      (setq ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT")))))
+      (if (or (vl-catch-all-error-p ss) (null ss))
+        (mark:out "[INFO] Объектов нет.")
+        (progn
+          (setq i (sslength ss) best nil)
+          (mark:out (strcat "[INFO] Всего вставок: " (itoa i)))
+          ;; собираем вставки в радиусе 1500 от точки
+          (repeat i
+            (setq i  (1- i)
+                  e  (ssname ss i)
+                  ed (entget e)
+                  ip (cdr (assoc 10 ed)))
+            (if (and ip (car ip))
+              (progn
+                (setq d (distance (list (car p) (cadr p) 0.0)
+                                  (list (car ip) (cadr ip) 0.0)))
+                (if (<= d 1500.0)
+                  (setq best (cons (list d e ip) best))))))
+          (setq best (vl-sort best '(lambda (a b) (< (car a) (car b)))))
+          (if (null best)
+            (mark:out "[INFO] Рядом (<=1500) вставок не найдено. Увеличьте зону или укажите точнее.")
+            (progn
+              (mark:out (strcat "[INFO] Найдено рядом: " (itoa (length best))))
+              (setq i 0)
+              (foreach item best
+                (if (< i 8)
+                  (progn
+                    (setq i     (1+ i)
+                          e     (cadr item)
+                          ip    (caddr item)
+                          names (mark:diag-name e)
+                          nm    (car names)
+                          raw   (cadr names)
+                          match (mark:fill-opening-block? nm)
+                          eb    (mark:fill-vla-bb e))
+                    (mark:out
+                      (strcat "  #" (itoa i)
+                              " d=" (rtos (car item) 2 0)
+                              "  EffName='" nm "'"
+                              "  Block='" (if (mark:strp raw) raw "?") "'"
+                              "  проём=" (if match "ДА" "нет")))
+                    (if eb
+                      (mark:out
+                        (strcat "      BB X " (rtos (nth 0 eb) 2 1)
+                                ".." (rtos (nth 2 eb) 2 1)
+                                "  Y " (rtos (nth 1 eb) 2 1)
+                                ".." (rtos (nth 3 eb) 2 1)))
+                      (mark:out "      BB: нет (VLA не дал габарит)")))))))))))
+  (princ))
+
 (defun c:SNAPSHOT (/ ss i e bb lst fn f ed typ p0 p1 rad w h)
   (prompt "\nВыберите элементы для снятия геометрии (SNAPSHOT): ")
   (setq ss (ssget))
@@ -6656,5 +6754,6 @@
   "\nМАРКАЗАПБЛОК   — 1-Сетка-мультилинии, 2-Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии"
   "\nТочка-динамика — отдельная команда; в списке: 4 или Д"
   "\nМАРКАЗАПТЕСТ   — проверка ячейки на тестовом блоке из линий"
-  "\nМАРКАЗАПКОПИИ — собрать копии динблоков в группу, подсветить и спросить об удалении\n"))
+  "\nМАРКАЗАПКОПИИ — собрать полные дубли объектов в группу и подсветить (без удаления)"
+  "\nМАРКАДИАГ      — диагностика: что за блок стоит у окна/двери и как его видит LISP\n"))
 (princ)
