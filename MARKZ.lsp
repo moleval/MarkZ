@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 47.7")
+(setq *mark:rev*    "Ред. 47.8")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1369,7 +1369,7 @@
       (if (= out "") k (strcat out "+" k))))
   out)
 
-(defun mark:validate-marks (/ bad sorted r shown total lines)
+(defun mark:validate-marks (/ bad sorted r shown total lines vis)
   (mark:out "")
   (setq bad nil)
   (foreach r *mark:records*
@@ -1402,17 +1402,21 @@
          (if (< shown *mark:test13-show*)
            (progn
              (setq shown (1+ shown))
-             (mark:out (strcat "Блок " (itoa (mark:rec-get r 'idx)) ":"))
-             (mark:out
-               (strcat (mark:fmt-raw (mark:rec-get r 'width))
-                       " x "
-                       (mark:fmt-raw (mark:rec-get r 'height))
-                       " / "
-                       (if (mark:rec-get r 'vis)
+             ;; Одна строка на блок, колонки выровнены по ширине.
+             (setq vis (if (mark:rec-get r 'vis)
                          (mark:rec-get r 'vis)
-                         "—")))
-             (mark:out (strcat "> " (mark:rec-get r 'mark-new)))
-             (mark:out ""))))
+                         "—"))
+             (mark:out
+               (strcat "Блок " (mark:rjust (itoa (mark:rec-get r 'idx)) 3) ": "
+                       (mark:rjust (mark:fmt-raw (mark:rec-get r 'width)) 5)
+                       " x "
+                       (mark:rjust (mark:fmt-raw (mark:rec-get r 'height)) 5)
+                       " / "
+                       vis
+                       (substr "              " 1
+                               (max 1 (- 14 (strlen vis))))
+                       " > "
+                       (mark:rec-get r 'mark-new))))))
        (if (> total *mark:test13-show*)
          (mark:out
            (strcat "... (показаны первые " (itoa *mark:test13-show*)
@@ -3982,8 +3986,17 @@
       (setq hit t)))
   hit)
 
+(defun mark:fill-lwpoly-closed? (e / ed)
+  ;; Замкнутая полилиния — контур ячейки (семантика 7-Полилиния).
+  (setq ed (if e (entget e) nil))
+  (and ed
+       (= "LWPOLYLINE" (cdr (assoc 0 ed)))
+       (cdr (assoc 70 ed))
+       (= 1 (logand 1 (cdr (assoc 70 ed))))))
+
 (defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks
-                                       seen n-open axes vs hs items boxes)
+                                       seen n-open axes vs hs items boxes
+                                       polys n-poly bb)
   (mark:out "5-Сетка-все-типы: блоки, мультилинии, линии, полилинии, дуги.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
   (setq ss (mark:fill-all-ss))
@@ -3997,6 +4010,7 @@
       (setq segs   nil
             blocks nil
             seen   nil
+            polys  nil
             n-open 0
             i      (sslength ss))
       (while (> i 0)
@@ -4015,10 +4029,21 @@
              (t
               (setq blocks (cons (list 0.0 e) blocks)
                     seen   (cons (cons nm (cdr (assoc 10 ed))) seen)))))
-          ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
+          ;; Замкнутая полилиния — контур ячейки: габарит без отступа
+          ;; (семантика 7-Полилиния), в оси не идёт.
+          ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
+           (setq bb (mark:cell-bb e))
+           (if bb (setq polys (cons bb polys))))
+          ((member typ '("LINE" "ARC" "MLINE"))
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
-             (setq segs (append r segs))))))
+             (setq segs (append r segs))))
+          ;; Незамкнутая полилиния и старый POLYLINE — рамка из линий:
+          ;; отрезки с полушириной 0, отступ 25 не нужен.
+          ((member typ '("LWPOLYLINE" "POLYLINE"))
+           (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+           (if (and r (not (vl-catch-all-error-p r)))
+             (setq segs (append (mark:fill-lines-hw0 r) segs))))))
       (if (> n-open 0)
         (mark:out
           (strcat "[INFO] Блоков проёма в выборе пропущено: " (itoa n-open)
@@ -4061,6 +4086,22 @@
            (strcat "[INFO] Осей: вертикальных " (itoa (length vs))
                    ", горизонтальных " (itoa (length hs)) "."))
          (setq boxes (mark:fill-items->cells vs hs))))
+      ;; Полилинии-контуры: ячейка = габарит замкнутой полилинии, без
+      ;; отступа. Крупнее лимита — не ячейка, а контур участка.
+      (setq n-poly 0)
+      (foreach bb polys
+        (if (or (and (numberp *mark:fill-max-w*)
+                     (> (- (nth 2 bb) (nth 0 bb)) *mark:fill-max-w*))
+                (and (numberp *mark:fill-max-h*)
+                     (> (- (nth 3 bb) (nth 1 bb)) *mark:fill-max-h*)))
+          (setq n-poly (1+ n-poly))
+          (setq boxes (cons bb boxes))))
+      (if polys
+        (mark:out
+          (strcat "[INFO] Полилиний-контуров: " (itoa (length polys))
+                  (if (> n-poly 0)
+                    (strcat ", крупнее лимита пропущено: " (itoa n-poly))
+                    ""))))
       ;; Фильтр проёмов: зона сетки, лог, пропуск ячеек с окнами/дверями.
       (foreach bb (mark:fill-filter-opening-cells boxes)
         (setq r (mark:fill-add cells pts bb)
@@ -4086,7 +4127,8 @@
           (ssadd (ssname ins i) out)))))
   out)
 
-(defun mark:fill-mode-all-point (cells pts / pt ptw win ss i e ed typ nm r segs)
+(defun mark:fill-mode-all-point (cells pts / pt ptw win ss i e ed typ nm r segs
+                                          best best-area a verts bb)
   (setq pt (getpoint "\n6-Точка-все-типы: укажите точку внутри ячейки <Enter>: "))
   (if (null pt)
     (list cells pts 'cancel)
@@ -4109,6 +4151,8 @@
           ;; полилинии — отрезки (у MLINE — полуширина). Смешанная
           ;; ячейка «блок + линия» собирается из общего списка (Ред. 47.7).
           (setq segs nil
+                best nil
+                best-area nil
                 i    (sslength ss))
           (while (> i 0)
             (setq i   (1- i)
@@ -4123,21 +4167,53 @@
                  (progn
                    (setq r (mark:fill-segs-of-ins e))
                    (if r (setq segs (append r segs))))))
-              ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
+              ;; Замкнутая полилиния: контур ячейки. Если точка внутри —
+              ;; это она (как в 2/7); рёбра идут в отрезки с hw 0.
+              ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
                (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
                (if (and r (not (vl-catch-all-error-p r)))
-                 (setq segs (append r segs))))))
+                 (setq segs (append (mark:fill-lines-hw0 r) segs)))
+               (setq verts (mark:fill-poly-verts e))
+               (if (and verts (mark:fill-pt-in (car pt) (cadr pt) verts))
+                 (progn
+                   (setq a (mark:fill-poly-area verts))
+                   (if (or (null best-area) (< a best-area))
+                     (setq best-area a
+                           best e)))))
+              ((member typ '("LINE" "ARC" "MLINE"))
+               (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+               (if (and r (not (vl-catch-all-error-p r)))
+                 (setq segs (append r segs))))
+              ;; Незамкнутая полилиния и старый POLYLINE: hw 0, без отступа.
+              ((member typ '("LWPOLYLINE" "POLYLINE"))
+               (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+               (if (and r (not (vl-catch-all-error-p r)))
+                 (setq segs (append (mark:fill-lines-hw0 r) segs))))))
           (mark:out
             (strcat "[INFO] Отрезков каркаса рядом с точкой: "
                     (itoa (length segs))))
-          ;; 1) Проверенная Точка-динамика: ячейка между блоками.
-          (setq r (mark:fill-dyn-cell pt ptw cells pts))
-          ;; 2) Общий список отрезков: лучи, затем сетка и минимальная
-          ;;    ячейка под точкой (как в Точка-мультилинии).
-          (if (or (null r) (null (car r)))
-            (if (>= (length segs) 4)
-              (setq r (mark:fill-try-segs segs pt cells pts))))
-          (if r r (list cells pts)))))))
+          (cond
+            ;; 1) Точка в замкнутой полилинии — контур ячейки без отступа
+            ;;    (как 2-Точка-мультилинии и 7-Полилиния).
+            (best
+             (setq bb (mark:cell-bb best))
+             (if bb
+               (progn
+                 (mark:out
+                   "[INFO] Точка в замкнутой полилинии — контур без отступа.")
+                 (mark:fill-add cells pts bb))
+               (progn
+                 (mark:out "[WARN] Габарит ячейки не взят.")
+                 (list cells pts))))
+            (t
+             ;; 2) Проверенная Точка-динамика: ячейка между блоками.
+             (setq r (mark:fill-dyn-cell pt ptw cells pts))
+             ;; 3) Общий список отрезков: лучи, затем сетка и минимальная
+             ;;    ячейка под точкой (как в Точка-мультилинии).
+             (if (or (null r) (null (car r)))
+               (if (>= (length segs) 4)
+                 (setq r (mark:fill-try-segs segs pt cells pts))))
+             (if r r (list cells pts)))))))))
 
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
   (mark:out "Тыкайте в границы ячеек (замкнутые полилинии и т.п.).")
