@@ -104,7 +104,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 47.6")
+(setq *mark:rev*    "–ед. 47.7")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3970,48 +3970,7 @@
   (setq ss (vl-catch-all-apply 'ssget (list filter)))
   (if (or (vl-catch-all-error-p ss) (null ss)) nil ss))
 
-(defun mark:fill-all-segs (ss / i e ed typ r nm out n)
-  (setq out nil n 0 i (if ss (sslength ss) 0))
-  (while (> i 0)
-    (setq i (1- i) e (ssname ss i) ed (entget e)
-          typ (if ed (cdr (assoc 0 ed)) nil) r nil)
-    (cond
-      ((= typ "INSERT")
-       (setq nm (mark:fill-eff-name e))
-       (if (and (not (mark:fill-skip-block? nm))
-                (not (mark:fill-opening-block? nm)))
-         (setq r (mark:fill-segs-of-ins e)))
-       (if (mark:fill-opening-block? nm)
-         (mark:out (strcat "[INFO] Ѕлок проЄма пропущен: " nm))))
-      ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
-       (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
-       (if (vl-catch-all-error-p r) (setq r nil))))
-    (if r (progn (setq out (append r out) n (1+ n)))))
-  (mark:out (strcat "[INFO] ”ниверсально обработано объектов: " (itoa n)
-                    ", отрезков: " (itoa (length out))))
-  out)
-
-
-(defun mark:fill-seg-same? (a b / t0)
-  (setq t0 *mark:fill-tol*)
-  (or (and (<= (distance (list (nth 0 a) (nth 1 a) 0.0)
-                         (list (nth 0 b) (nth 1 b) 0.0)) t0)
-           (<= (distance (list (nth 2 a) (nth 3 a) 0.0)
-                         (list (nth 2 b) (nth 3 b) 0.0)) t0))
-      (and (<= (distance (list (nth 0 a) (nth 1 a) 0.0)
-                         (list (nth 2 b) (nth 3 b) 0.0)) t0)
-           (<= (distance (list (nth 2 a) (nth 3 a) 0.0)
-                         (list (nth 0 b) (nth 1 b) 0.0)) t0))))
-
-(defun mark:fill-segs-unique (segs / out s hit)
-  (setq out nil)
-  (foreach s segs
-    (setq hit nil)
-    (foreach x out
-      (if (mark:fill-seg-same? s x) (setq hit t)))
-    (if (null hit) (setq out (cons s out))))
-  (reverse out))
-
+;; ƒубликат вставки в одной точке Ч один каркас (копии блоков).
 (defun mark:fill-block-seen? (seen nm e / p hit q)
   (setq p (cdr (assoc 10 (entget e)))
         hit nil)
@@ -4023,96 +3982,93 @@
       (setq hit t)))
   hit)
 
-
-(defun mark:fill-bb-same? (a b / t0)
-  (setq t0 *mark:fill-tol*)
-  (and (<= (abs (- (nth 0 a) (nth 0 b))) t0)
-       (<= (abs (- (nth 1 a) (nth 1 b))) t0)
-       (<= (abs (- (nth 2 a) (nth 2 b))) t0)
-       (<= (abs (- (nth 3 a) (nth 3 b))) t0)))
-
-(defun mark:fill-cells-unique (bbs / out bb hit old area oldarea x)
-  ;; ƒл€ одной точки вставки оставл€ем только €чейку меньшей площади.
-  ;; Ёто устран€ет варианты 700/1375, возникающие при наложении источников.
-  (setq out nil)
-  (foreach bb bbs
-    (setq hit nil old nil)
-    (foreach x out
-      (if (and (<= (abs (- (nth 0 bb) (nth 0 x))) *mark:fill-tol*)
-               (<= (abs (- (nth 1 bb) (nth 1 x))) *mark:fill-tol*))
-        (setq hit t old x)))
-    (if (null hit)
-      (if (null (mark:fill-cell-opening? bb))
-        (setq out (cons bb out)))
-      (progn
-        (setq area (* (- (nth 2 bb) (nth 0 bb))
-                      (- (nth 3 bb) (nth 1 bb)))
-              oldarea (* (- (nth 2 old) (nth 0 old))
-                         (- (nth 3 old) (nth 1 old))))
-        (if (< area oldarea)
-          (setq out (subst bb old out))))))
-  (reverse out))
-
-
-(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks block-cells line-cells all-bb bb seen)
-  (mark:out "5-—етка-все-типы: блоки, линии, полилинии и мультилинии.")
+(defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks
+                                       seen n-open axes vs hs items boxes)
+  (mark:out "5-—етка-все-типы: блоки, мультилинии, линии, полилинии, дуги.")
   (mark:out "¬ыберите объекты каркаса рамкой. Enter Ч отмена.")
-  (setq ss (mark:fill-all-ss)
-        segs nil
-        blocks nil
-        seen nil)
+  (setq ss (mark:fill-all-ss))
   (if (null ss)
     (list cells pts 'cancel)
     (progn
       (mark:fill-type-stat ss)
-      ;; ѕроЄмы загружаютс€ один раз до расчЄта €чеек.
-      (mark:fill-load-openings)
-      (setq i (sslength ss))
+      ;; –азбор выбора: блоки -> каркас-вставки, остальное -> отрезки.
+      ;; ѕроЄмы (окно/дверь) Ч не каркас: линии рамы заход€т в световой
+      ;; проЄм и занижают €чейку (–ед. 47.6).
+      (setq segs   nil
+            blocks nil
+            seen   nil
+            n-open 0
+            i      (sslength ss))
       (while (> i 0)
-        (setq i (1- i)
-              e (ssname ss i)
-              ed (entget e)
+        (setq i   (1- i)
+              e   (ssname ss i)
+              ed  (entget e)
               typ (if ed (cdr (assoc 0 ed)) nil))
         (cond
           ((= typ "INSERT")
            (setq nm (mark:fill-eff-name e))
-           (if (and (not (mark:fill-skip-block? nm))
-                    (not (mark:fill-opening-block? nm))
-                    (not (mark:fill-block-seen? seen nm e)))
-             (progn
-               (setq blocks (cons (list 0.0 e) blocks)
-                     seen (cons (cons nm (cdr (assoc 10 ed))) seen)))))
+           (cond
+             ((mark:fill-skip-block? nm) nil)
+             ((mark:fill-opening-block? nm)
+              (setq n-open (1+ n-open)))
+             ((mark:fill-block-seen? seen nm e) nil)
+             (t
+              (setq blocks (cons (list 0.0 e) blocks)
+                    seen   (cons (cons nm (cdr (assoc 10 ed))) seen)))))
           ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
-             (setq segs (append r segs)))))
-      (setq segs (mark:fill-segs-unique segs)
-            block-cells nil
-            line-cells nil)
-      ;; Ѕлокова€ часть: ровно один вызов старого алгоритма 3.
-      (if blocks
-        (setq block-cells (mark:fill-closed-cells blocks)))
-      ;; Ћинейна€ часть: один расчЄт по MLINE/LINE/POLYLINE.
-      (if segs
-        (progn
-          (setq r (mark:fill-segs->cells segs))
-          (foreach bb (car r)
-            (if (mark:fill-box-closed segs bb)
-              (setq line-cells (cons bb line-cells))))))
-      (setq all-bb (mark:fill-cells-unique
-                     (append block-cells (reverse line-cells))))
-      (mark:out (strcat "[INFO] ”ниверсальна€ сетка: блоковых €чеек "
-                        (itoa (length block-cells))))
-      (mark:out (strcat "[INFO] ”ниверсальна€ сетка: линейных кандидатов "
-                        (itoa (length line-cells))))
-      (mark:out (strcat "[INFO] ”ниверсальна€ сетка: уникальных €чеек "
-                        (itoa (length all-bb))))
-      ;; ¬ставка выполн€етс€ один раз, после полного расчЄта.
-      (foreach bb all-bb
+             (setq segs (append r segs))))))
+      (if (> n-open 0)
+        (mark:out
+          (strcat "[INFO] Ѕлоков проЄма в выборе пропущено: " (itoa n-open)
+                  " Ч окно/дверь не каркас.")))
+      (mark:out
+        (strcat "[INFO]  аркас: блоков " (itoa (length blocks))
+                ", отрезков " (itoa (length segs))))
+      (setq boxes nil)
+      (cond
+        ;; “олько линии Ч дословно конвейер 1-—етка-мультилинии:
+        ;; оси, “-объединение, проверка замкнутости grid-valid.
+        ((null blocks)
+         (if segs
+           (progn
+             (mark:out
+               "[INFO] Ћинейный каркас Ч расчЄт как в 1-—етка-мультилинии.")
+             (setq r (mark:fill-segs->cells segs))
+             (mark:out
+               (strcat "[INFO] —етка: осей X " (itoa (cadr r))
+                       " Y " (itoa (caddr r))
+                       "  €чеек " (itoa (length (car r)))))
+             (if (null (car r))
+               (mark:out "[INFO] ћало осей Ч увеличьте *mark:fill-tol*."))
+             (setq boxes (car r)))))
+        ;; “олько блоки Ч дословно конвейер 3-—етка-динамика.
+        ((null segs)
+         (mark:out "[INFO] Ѕлочный каркас Ч расчЄт как в 3-—етка-динамика.")
+         (setq boxes (mark:fill-closed-cells blocks)))
+        ;; —мешанный каркас: оси блоков и линий в одном списке Ч €чейка
+        ;; может быть собрана из блоков и линий (–ед. 47.7).
+        (t
+         (mark:out "[INFO] —мешанный каркас: блоки и линии, единый расчЄт осей.")
+         (setq axes  (mark:fill-owned-axes blocks)
+               vs    (car axes)
+               hs    (cadr axes)
+               items (mark:fill-seg-items segs)
+               vs    (append vs (car items))
+               hs    (append hs (cadr items)))
+         (mark:out
+           (strcat "[INFO] ќсей: вертикальных " (itoa (length vs))
+                   ", горизонтальных " (itoa (length hs)) "."))
+         (setq boxes (mark:fill-items->cells vs hs))))
+      ;; ‘ильтр проЄмов: зона сетки, лог, пропуск €чеек с окнами/двер€ми.
+      (foreach bb (mark:fill-filter-opening-cells boxes)
         (setq r (mark:fill-add cells pts bb)
               cells (car r)
-              pts (cadr r)))
-      (list cells pts)))))
+              pts   (cadr r)))
+      (list cells pts))))
+
+
 (defun mark:fill-all-near-ss (pt win / p0 p1 filter ss ins out i)
   (setq p0 (list (- (car pt) win) (- (cadr pt) win))
         p1 (list (+ (car pt) win) (+ (cadr pt) win))
@@ -4130,31 +4086,34 @@
           (ssadd (ssname ins i) out)))))
   out)
 
-(defun mark:fill-mode-all-point (cells pts / pt win ss i e ed typ nm r bsegs lsegs segs)
+(defun mark:fill-mode-all-point (cells pts / pt ptw win ss i e ed typ nm r segs)
   (setq pt (getpoint "\n6-“очка-все-типы: укажите точку внутри €чейки <Enter>: "))
   (if (null pt)
     (list cells pts 'cancel)
     (progn
-      (setq win (if (and (numberp *mark:fill-window*)
+      (setq ptw (mark:fill-pt-wcs pt)
+            win (if (and (numberp *mark:fill-window*)
                          (> *mark:fill-window* 0.0))
                   *mark:fill-window* 5000.0)
-            pt (mark:fill-pt-wcs pt)
-            ss (mark:fill-all-near-ss pt win)
-            bsegs nil
-            lsegs nil)
+            ss  (mark:fill-all-near-ss ptw win))
       (if (null ss)
         (progn
           (setq win (* win 4.0)
-                ss (mark:fill-all-near-ss pt win)))
+                ss (mark:fill-all-near-ss ptw win)))
         nil)
       (if (null ss)
         (list cells pts)
         (progn
-          (setq i (sslength ss))
+          ;; ¬се типы Ч в один список отрезков: блоки дают текущую
+          ;; видимость (мультилини€ в блоке Ч с полушириной), линии и
+          ;; полилинии Ч отрезки (у MLINE Ч полуширина). —мешанна€
+          ;; €чейка Ђблок + лини€ї собираетс€ из общего списка (–ед. 47.7).
+          (setq segs nil
+                i    (sslength ss))
           (while (> i 0)
-            (setq i (1- i)
-                  e (ssname ss i)
-                  ed (entget e)
+            (setq i   (1- i)
+                  e   (ssname ss i)
+                  ed  (entget e)
                   typ (if ed (cdr (assoc 0 ed)) nil))
             (cond
               ((= typ "INSERT")
@@ -4163,18 +4122,23 @@
                         (not (mark:fill-opening-block? nm)))
                  (progn
                    (setq r (mark:fill-segs-of-ins e))
-                   (if r (setq bsegs (append r bsegs))))))
+                   (if r (setq segs (append r segs))))))
               ((member typ '("LINE" "LWPOLYLINE" "POLYLINE" "MLINE" "ARC"))
                (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
                (if (and r (not (vl-catch-all-error-p r)))
-                 (setq lsegs (append r lsegs)))))
-          ;; —начала используем проверенную старую точку-динамику.
-          (setq r (mark:fill-dyn-cell pt (mark:fill-pt-wcs pt) cells pts))
+                 (setq segs (append r segs))))))
+          (mark:out
+            (strcat "[INFO] ќтрезков каркаса р€дом с точкой: "
+                    (itoa (length segs))))
+          ;; 1) ѕроверенна€ “очка-динамика: €чейка между блоками.
+          (setq r (mark:fill-dyn-cell pt ptw cells pts))
+          ;; 2) ќбщий список отрезков: лучи, затем сетка и минимальна€
+          ;;    €чейка под точкой (как в “очка-мультилинии).
           (if (or (null r) (null (car r)))
-            (setq r (if bsegs (mark:fill-try-segs bsegs pt cells pts) nil)))
-          (if (or (null r) (null (car r)))
-            (setq r (if lsegs (mark:fill-try-segs lsegs pt cells pts) nil)))
-          (if r r (list cells pts))))))))
+            (if (>= (length segs) 4)
+              (setq r (mark:fill-try-segs segs pt cells pts))))
+          (if r r (list cells pts)))))))
+
 (defun mark:fill-mode-poly (cells pts / sel e bb r)
   (mark:out "“ыкайте в границы €чеек (замкнутые полилинии и т.п.).")
   (mark:out "Enter Ч конец выбора.")
@@ -5636,16 +5600,45 @@
               "")))
   (list vs hs))
 
-(defun mark:fill-closed-cells (hits / axes vs hs cols rows iL iR nL nR
-                                     Lcol Rcol xL xR w spanning iB nB
-                                     bot top yB yT h gap boxes
-                                     oL oR n-own n-open)
+(defun mark:fill-seg-items (segs / vs hs s x0 y0 x1 y1 dx dy ln hw k)
+  ;; ќтрезки линий -> элементы осей (ось y0 y1 hw владелец), тот же формат,
+  ;; что дают блоки в mark:fill-owned-axes. ¬ладелец Ч уникальный
+  ;; отрицательный номер на отрезок: каркас из линий равноправен с
+  ;; блоками. ѕолуширина Ч из отрезка (MLINE), иначе 25 мм, как в 1/2.
+  (setq vs nil
+        hs nil
+        k   0)
+  (foreach s segs
+    (setq x0 (min (float (nth 0 s)) (float (nth 2 s)))
+          y0 (min (float (nth 1 s)) (float (nth 3 s)))
+          x1 (max (float (nth 0 s)) (float (nth 2 s)))
+          y1 (max (float (nth 1 s)) (float (nth 3 s)))
+          dx  (- x1 x0)
+          dy  (- y1 y0)
+          ln  (sqrt (+ (* dx dx) (* dy dy)))
+          k   (1- k)
+          hw  (if (and (> (length s) 4) (numberp (nth 4 s)))
+                (float (nth 4 s))
+                25.0))
+    (if (>= ln 30.0)
+      (cond
+        ((<= dy (* *mark:fill-slope* ln))
+         (setq hs (cons (list (/ (+ (float (nth 1 s)) (float (nth 3 s))) 2.0)
+                              x0 x1 hw k)
+                        hs)))
+        ((<= dx (* *mark:fill-slope* ln))
+         (setq vs (cons (list (/ (+ (float (nth 0 s)) (float (nth 2 s))) 2.0)
+                              y0 y1 hw k)
+                        vs))))))
+  (list vs hs))
+
+(defun mark:fill-items->cells (vs hs / cols rows iL iR nL nR
+                                Lcol Rcol xL xR w spanning iB nB
+                                bot top yB yT h gap boxes
+                                oL oR n-own n-open)
   ;; ячейка только если четыре стороны доход€т до углов и
-  ;; противоположные стороны принадлежат разным блокам.
-  (setq axes (mark:fill-owned-axes hits)
-        vs (car axes)
-        hs (cadr axes)
-        *mark:h-bins* (mark:fill-index-hs hs)
+  ;; противоположные стороны принадлежат разным владельцам.
+  (setq *mark:h-bins* (mark:fill-index-hs hs)
         cols (mark:fill-cluster-items vs)
         gap (+ *mark:fill-tol* 25.0)
         boxes nil
@@ -5716,6 +5709,14 @@
   (if (null boxes)
     (mark:out "[INFO] Ќезамкнутый контур и камеры профил€ не заполн€ю."))
   (reverse boxes))
+
+(defun mark:fill-closed-cells (hits / axes vs hs)
+  ;; Ѕлоки каркаса -> замкнутые €чейки (как в 3-—етка-динамика).
+  ;; “ело расчЄта Ч mark:fill-items->cells, общее с 5-—етка-все-типы.
+  (setq axes (mark:fill-owned-axes hits)
+        vs (car axes)
+        hs (cadr axes))
+  (mark:fill-items->cells vs hs))
 
 (defun mark:fill-grid-zone (bbs / x0 y0 x1 y1)
   ;; ќбща€ зона сетки по всем €чейкам (xmin ymin xmax ymax).
@@ -6519,7 +6520,9 @@
      (setq r (mark:fill-mode-all-grid cells pts)
            cells (car r) pts (cadr r)
            t_geom (/ (- (getvar "MILLISECS") t_geom_start) 1000.0)
-           ins-list (mark:fill-apply cells pts)))
+           ins-list (mark:fill-apply cells pts))
+     (if cells
+       (mark:out (strcat "[“ј…ћ»Ќ√] –асчет геометрии сетки: " (rtos t_geom 2 2) " с"))))
     ((= mode "6")
      (setq ins-list
        (mark:fill-points-loop
@@ -6559,8 +6562,8 @@
   (if (eq mode "grid")
     (progn
       ;; ¬ј–»јЌ“ 1: ѕќ —≈“ ≈ (полный цикл: ћј– ј«јѕЅЋќ  -> ћј– ј–ќ¬ ј«јѕ -> ћј– ј«јѕ–яƒ -> ћј– ј«јѕ“јЅЋ)
-      (mark:out "[Ё“јѕ 1/4] ћј– ј«јѕЅЋќ  Ч раскладка заполнений по сетке витража...")
-      (setq r (mark:fill-mode-grid nil nil)
+      (mark:out "[Ё“јѕ 1/4] ћј– ј«јѕЅЋќ  Ч раскладка по сетке, режим 5-—етка-все-типы...")
+      (setq r (mark:fill-mode-all-grid nil nil)
             cells (car r)
             pts   (cadr r))
       (if (null cells)
