@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 47.1")
+(setq *mark:rev*    "Ред. 47.2")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3675,6 +3675,12 @@
 (if (null *mark:opening-skip-masks*)
   (setq *mark:opening-skip-masks* (list "*КАССЕТ*")))
 
+;; Допуск (мм) на «неполное заполнение» проёма: разница габарита проёма и
+;; ячейки меньше него считается погрешностью и НЕ вызывает предупреждение
+;; и подсветку. Можно менять в чертеже: (setq *mark:opening-fit-tol* 30.0)
+(if (null *mark:opening-fit-tol*)
+  (setq *mark:opening-fit-tol* 20.0))
+
 (defun mark:fill-opening-block? (name / u hit m)
   (setq u (strcase (if name name "")) hit nil)
   (if (= u "")
@@ -3743,9 +3749,17 @@
           (list (car a) (cadr a) (car b) (cadr b)))
         nil))))
 
+(defun mark:fill-bb-in-zone? (eb z)
+  ;; Пересекается ли габарит проёма с зоной сетки z (xmin ymin xmax ymax).
+  (or (null z)
+      (and eb
+           (<= (nth 0 eb) (nth 2 z)) (>= (nth 2 eb) (nth 0 z))
+           (<= (nth 1 eb) (nth 3 z)) (>= (nth 3 eb) (nth 1 z)))))
+
 (defun mark:fill-load-openings (/ ss i e ed nm eb out)
-  ;; Реальные габариты проёмов получаем напрямую через VLA, без разбора
-  ;; динамической геометрии и без побочных повторных расчётов.
+  ;; Реальные габариты проёмов получаем напрямую через VLA. Если задана зона
+  ;; сетки (*mark:grid-zone*) — берём только проёмы, попадающие в неё
+  ;; (быстрее и без «мусора» из других видов). Подробный список НЕ печатаем.
   (setq out nil
         ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT")))))
   (if (and ss (not (vl-catch-all-error-p ss)))
@@ -3762,30 +3776,22 @@
             (if (null eb) (setq eb (mark:cell-bb e)))
             ;; Если Bounding Box отсутствует — размеры из динамики.
             (if (null eb) (setq eb (mark:fill-opening-dim-bb e)))
-            (if eb
-              (progn
-                (setq out (cons (list nm eb) out))
-                (mark:out
-                  (strcat "[INFO] Проём: " (if nm nm "?")
-                          "  X " (rtos (nth 0 eb) 2 1)
-                          ".." (rtos (nth 2 eb) 2 1)
-                          "  Y " (rtos (nth 1 eb) 2 1)
-                          ".." (rtos (nth 3 eb) 2 1))))
-              (mark:out
-                (strcat "[WARN] Проём без габаритов: " (if nm nm "?")))))))))
+            (if (and eb (mark:fill-bb-in-zone? eb *mark:grid-zone*))
+              ;; Тройка: имя проёма, габарит, ename блока (для подсветки).
+              (setq out (cons (list nm eb e) out))))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
   (mark:out (strcat "[INFO] Проёмов для фильтра: " (itoa (length out))))
   out)
 
 
-(defun mark:fill-cell-opening? (bb / hit hit-eb item eb cx cy tol)
+(defun mark:fill-cell-opening? (bb / hit hit-eb hit-e item eb cx cy tol)
   ;; Ячейка считается занятой проёмом, если ЦЕНТР ячейки попадает внутрь
   ;; габарита окна/двери. Так проём захватывает только ту ячейку, в которой
   ;; он реально стоит, а не соседние из-за небольшого «залезания» рамки.
   (if (and bb (not *mark:opening-loaded*))
     (mark:fill-load-openings))
-  (setq hit nil hit-eb nil)
+  (setq hit nil hit-eb nil hit-e nil)
   (if bb
     (progn
       (setq cx (/ (+ (nth 0 bb) (nth 2 bb)) 2.0)
@@ -3795,24 +3801,28 @@
         (if (and (null hit) eb
                  (>= cx (nth 0 eb)) (<= cx (nth 2 eb))
                  (>= cy (nth 1 eb)) (<= cy (nth 3 eb)))
-          (setq hit (car item) hit-eb eb)))))
-  ;; Предупреждение: проём найден, но НЕ полностью накрывает ячейку.
-  ;; Допуск на «залезание» рамки — 1 мм, чтобы не шуметь на округлениях.
+          (setq hit (car item) hit-eb eb hit-e (caddr item))))))
+  ;; Проём найден, но НЕ полностью накрывает ячейку (с учётом допуска на
+  ;; небольшие погрешности в размерах). Тогда: предупреждение + счётчик +
+  ;; запоминаем блок проёма, чтобы подсветить его после заполнения.
   (if (and hit hit-eb)
     (progn
-      (setq tol 1.0)
+      (setq tol (if (numberp *mark:opening-fit-tol*) *mark:opening-fit-tol* 20.0))
       (if (not (and (<= (nth 0 hit-eb) (+ (nth 0 bb) tol))
                     (<= (nth 1 hit-eb) (+ (nth 1 bb) tol))
                     (>= (nth 2 hit-eb) (- (nth 2 bb) tol))
                     (>= (nth 3 hit-eb) (- (nth 3 bb) tol))))
-        (mark:out
-          (strcat "[WARN] Проём «" hit
-                  "» не полностью заполняет ячейку "
-                  (rtos (nth 0 bb) 2 1) "," (rtos (nth 1 bb) 2 1)
-                  " (W=" (rtos (- (nth 2 bb) (nth 0 bb)) 2 0)
-                  " H=" (rtos (- (nth 3 bb) (nth 1 bb)) 2 0)
-                  ") — проверьте вручную."))))
-    nil)
+        (progn
+          (mark:out
+            (strcat "[WARN] Проём «" hit
+                    "» не полностью заполняет ячейку "
+                    (rtos (nth 0 bb) 2 1) "," (rtos (nth 1 bb) 2 1)
+                    " (W=" (rtos (- (nth 2 bb) (nth 0 bb)) 2 0)
+                    " H=" (rtos (- (nth 3 bb) (nth 1 bb)) 2 0)
+                    ") — проверьте вручную."))
+          (mark:note-warning)
+          (if (and hit-e (not (member hit-e *mark:opening-partial*)))
+            (setq *mark:opening-partial* (cons hit-e *mark:opening-partial*)))))))
   hit)
 
 
@@ -5555,7 +5565,23 @@
     (mark:out "[INFO] Незамкнутый контур и камеры профиля не заполняю."))
   (reverse boxes))
 
+(defun mark:fill-grid-zone (bbs / x0 y0 x1 y1)
+  ;; Общая зона сетки по всем ячейкам (xmin ymin xmax ymax).
+  (if (null bbs)
+    nil
+    (progn
+      (setq x0 (nth 0 (car bbs)) y0 (nth 1 (car bbs))
+            x1 (nth 2 (car bbs)) y1 (nth 3 (car bbs)))
+      (foreach bb bbs
+        (if (< (nth 0 bb) x0) (setq x0 (nth 0 bb)))
+        (if (< (nth 1 bb) y0) (setq y0 (nth 1 bb)))
+        (if (> (nth 2 bb) x1) (setq x1 (nth 2 bb)))
+        (if (> (nth 3 bb) y1) (setq y1 (nth 3 bb))))
+      (list x0 y0 x1 y1))))
+
 (defun mark:fill-filter-opening-cells (bbs / out skipped bb)
+  ;; Ограничиваем загрузку проёмов зоной сетки — быстрее и без лишних видов.
+  (setq *mark:grid-zone* (mark:fill-grid-zone bbs))
   (setq out nil skipped 0)
   (foreach bb bbs
     (if (mark:fill-cell-opening? bb)
@@ -6245,14 +6271,32 @@
                   (t "Сетка-мультилинии"))))
   mode)
 
+(defun mark:fill-highlight-partial (/ ss e n)
+  ;; Подсветить блоки окон/дверей, не полностью заполняющие свои ячейки.
+  (setq n (length *mark:opening-partial*))
+  (if (> n 0)
+    (progn
+      (setq ss (ssadd))
+      (foreach e *mark:opening-partial*
+        (if (and e (not (vl-catch-all-error-p
+                          (vl-catch-all-apply 'entget (list e)))))
+          (ssadd e ss)))
+      (sssetfirst nil ss)
+      (mark:out
+        (strcat "[INFO] Подсвечено проёмов с неполным заполнением: "
+                (itoa n) ". Проверьте выделенные окна/двери."))))
+  (princ))
+
 (defun mark:fill-main (/ kw mode cells pts r t_geom_start t_geom ins-list forced)
   (setq forced *mark:fill-force*
         *mark:fill-force* nil)
   (mark:cmd-line
     "МАРКАЗАПБЛОК — вставка «Заполнение в витраж». Список: 1-Сетка-мультилинии, 2-Точка-мультилинии, 3-Сетка-динамика, 4-Точка-динамика, 5-Сетка-все-типы, 6-Точка-все-типы, 7-Полилиния. Марки не пишет.")
   (mark:reset-state)
-  (setq *mark:opening-bbs* nil
-        *mark:opening-loaded* nil)
+  (setq *mark:opening-bbs*     nil
+        *mark:opening-loaded*  nil
+        *mark:opening-partial* nil
+        *mark:grid-zone*       nil)
   (mark:banner)
   (mark:out "МАРКАЗАПБЛОК — вставка «Заполнение в витраж» по ячейкам")
   (setq mode (if forced forced (mark:fill-ask-mode)))
@@ -6324,6 +6368,8 @@
          "[INFO] Режим «7-Полилиния» завершён. Вставлено: "))))
   (mark:out (strcat "Ошибок: " (itoa *mark:errors*)))
   (mark:out (strcat "Предупреждений: " (itoa *mark:warnings*)))
+  ;; После заполнения — подсветить проёмы, не полностью занявшие ячейки.
+  (mark:fill-highlight-partial)
   (setq *mark:fills* ins-list)
   (princ))
 (defun mark:a-all (/ kw mode doc r cells pts new-fills)
