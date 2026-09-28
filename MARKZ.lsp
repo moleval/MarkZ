@@ -6547,7 +6547,7 @@
               (list name grp))
             nil))))))
 
-(defun c:МАРКАЗАПКОПИИ (/ ss i e key acc groups g keep n extras ss2 grp)
+(defun c:МАРКАЗАПКОПИИ (/ ss i e key acc groups g keep n extras ss2 grp skipped-spds)
   ;; Ручной поиск по команде пользователя. Ищет полностью идентичные дубли
   ;; ЛЮБЫХ примитивов (тип, слой, цвет, геометрия, для блоков — ещё и вся
   ;; динамика, включая Видимость). Команда собирает лишние копии в группу и
@@ -6564,12 +6564,21 @@
     (progn
       (setq i (sslength ss))
       (mark:out (strcat "[INFO] Объектов в чертеже: " (itoa i)))
+      (setq skipped-spds 0)
       (repeat i
         (setq i (1- i)
-              e (ssname ss i)
-              key (mark:copy-key e))
-        (if key
-          (setq acc (cons (cons key e) acc))))
+              e (ssname ss i))
+        (if (mark:spds? e)
+          ;; Объекты SPDS/прокси пропускаем: AutoCAD не отдаёт их координаты
+          ;; корректно, дубли по ним считать нельзя.
+          (setq skipped-spds (1+ skipped-spds))
+          (progn
+            (setq key (mark:copy-key e))
+            (if key
+              (setq acc (cons (cons key e) acc))))))
+      (if (> skipped-spds 0)
+        (mark:out (strcat "[INFO] Пропущено объектов SPDS/прокси: "
+                          (itoa skipped-spds))))
       (setq acc (vl-sort acc '(lambda (a b) (< (car a) (car b))))
             groups nil
             g nil
@@ -6646,7 +6655,27 @@
     (setq dir ""))
   (strcat dir "MARKZ_SNAPSHOT.txt"))
 
-(defun mark:diag-name (e / obj nm2 nm raw)
+(defun mark:ax-objname (e / obj r)
+  ;; Класс объекта (ObjectName). Для SPDS/прокси это НЕ AcDbBlockReference.
+  (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+  (if (or (vl-catch-all-error-p obj) (null obj))
+    "?"
+    (progn
+      (setq r (vl-catch-all-apply 'vlax-get-property (list obj "ObjectName")))
+      (if (or (vl-catch-all-error-p r) (not (mark:strp r))) "?" r))))
+
+(defun mark:spds? (e / on typ)
+  ;; Признак объекта SPDS/иной внешней программы или прокси.
+  (setq on  (strcase (mark:ax-objname e))
+        typ (strcase (cond ((cdr (assoc 0 (entget e)))) (t ""))))
+  (or (wcmatch on "*SPDS*")
+      (wcmatch on "*СПДС*")
+      (wcmatch on "*PROXY*")
+      (wcmatch on "*ZOMBIE*")
+      (wcmatch typ "*PROXY*")
+      (wcmatch typ "*SPDS*")))
+
+(defun mark:diag-name (e / obj nm raw)
   (setq raw (cdr (assoc 2 (entget e)))
         obj (vl-catch-all-apply 'vlax-ename->vla-object (list e))
         nm  (if (and obj (not (vl-catch-all-error-p obj)))
@@ -6655,62 +6684,47 @@
   (list (if (mark:strp nm) nm "<нет EffectiveName>")
         (if (mark:strp raw) raw "?")))
 
-(defun c:МАРКАДИАГ (/ p ss i e ed ip d best bd names nm raw match eb)
-  ;; Диагностика: указать точку у окна/двери — покажет ближайшие вставки,
-  ;; их EffectiveName, имя блока и распознаётся ли блок как проём.
-  (mark:out "МАРКАДИАГ — укажите точку рядом с окном/дверью.")
-  (setq p (getpoint "\nТочка у проёма: "))
-  (if (null p)
-    (mark:out "[INFO] Отменено.")
+(defun c:МАРКАДИАГ (/ ss i e ed typ on names nm raw match eb cnt)
+  ;; Диагностика: ВЫДЕЛИТЕ рамкой окно/дверь — покажет для каждого объекта
+  ;; тип, класс (ObjectName), EffectiveName, имя блока, габариты и признак SPDS.
+  (mark:out "МАРКАДИАГ — выделите рамкой окно/дверь (можно один объект).")
+  (setq ss (vl-catch-all-apply 'ssget nil))
+  (if (or (vl-catch-all-error-p ss) (null ss))
+    (mark:out "[INFO] Ничего не выбрано.")
     (progn
-      (setq ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT")))))
-      (if (or (vl-catch-all-error-p ss) (null ss))
-        (mark:out "[INFO] Объектов нет.")
-        (progn
-          (setq i (sslength ss) best nil)
-          (mark:out (strcat "[INFO] Всего вставок: " (itoa i)))
-          ;; собираем вставки в радиусе 1500 от точки
-          (repeat i
-            (setq i  (1- i)
-                  e  (ssname ss i)
-                  ed (entget e)
-                  ip (cdr (assoc 10 ed)))
-            (if (and ip (car ip))
-              (progn
-                (setq d (distance (list (car p) (cadr p) 0.0)
-                                  (list (car ip) (cadr ip) 0.0)))
-                (if (<= d 1500.0)
-                  (setq best (cons (list d e ip) best))))))
-          (setq best (vl-sort best '(lambda (a b) (< (car a) (car b)))))
-          (if (null best)
-            (mark:out "[INFO] Рядом (<=1500) вставок не найдено. Увеличьте зону или укажите точнее.")
-            (progn
-              (mark:out (strcat "[INFO] Найдено рядом: " (itoa (length best))))
-              (setq i 0)
-              (foreach item best
-                (if (< i 8)
-                  (progn
-                    (setq i     (1+ i)
-                          e     (cadr item)
-                          ip    (caddr item)
-                          names (mark:diag-name e)
-                          nm    (car names)
-                          raw   (cadr names)
-                          match (mark:fill-opening-block? nm)
-                          eb    (mark:fill-vla-bb e))
-                    (mark:out
-                      (strcat "  #" (itoa i)
-                              " d=" (rtos (car item) 2 0)
-                              "  EffName='" nm "'"
-                              "  Block='" (if (mark:strp raw) raw "?") "'"
-                              "  проём=" (if match "ДА" "нет")))
-                    (if eb
-                      (mark:out
-                        (strcat "      BB X " (rtos (nth 0 eb) 2 1)
-                                ".." (rtos (nth 2 eb) 2 1)
-                                "  Y " (rtos (nth 1 eb) 2 1)
-                                ".." (rtos (nth 3 eb) 2 1)))
-                      (mark:out "      BB: нет (VLA не дал габарит)")))))))))))
+      (setq i   (sslength ss)
+            cnt 0)
+      (mark:out (strcat "[INFO] Выбрано объектов: " (itoa i)))
+      (repeat i
+        (setq i   (1- i)
+              e   (ssname ss i)
+              ed  (entget e)
+              typ (cdr (assoc 0 ed)))
+        (if (< cnt 15)
+          (progn
+            (setq cnt   (1+ cnt)
+                  on    (mark:ax-objname e)
+                  names (mark:diag-name e)
+                  nm    (car names)
+                  raw   (cadr names)
+                  match (mark:fill-opening-block? nm)
+                  eb    (mark:fill-vla-bb e))
+            (mark:out
+              (strcat "  #" (itoa cnt)
+                      "  DXF-тип=" (if (mark:strp typ) typ "?")
+                      "  Класс=" on
+                      (if (mark:spds? e) "  [SPDS/прокси]" "")))
+            (mark:out
+              (strcat "      EffName='" nm "'"
+                      "  Block='" (if (mark:strp raw) raw "?") "'"
+                      "  проём=" (if match "ДА" "нет")))
+            (if eb
+              (mark:out
+                (strcat "      BB X " (rtos (nth 0 eb) 2 1)
+                        ".." (rtos (nth 2 eb) 2 1)
+                        "  Y " (rtos (nth 1 eb) 2 1)
+                        ".." (rtos (nth 3 eb) 2 1)))
+              (mark:out "      BB: нет (VLA не дал габарит)")))))))
   (princ))
 
 (defun c:SNAPSHOT (/ ss i e bb lst fn f ed typ p0 p1 rad w h)
