@@ -104,7 +104,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 47.2")
+(setq *mark:rev*    "Ред. 47.3")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3777,8 +3777,18 @@
             ;; Если Bounding Box отсутствует — размеры из динамики.
             (if (null eb) (setq eb (mark:fill-opening-dim-bb e)))
             (if (and eb (mark:fill-bb-in-zone? eb *mark:grid-zone*))
-              ;; Тройка: имя проёма, габарит, ename блока (для подсветки).
-              (setq out (cons (list nm eb e) out))))))))
+              (progn
+                ;; Тройка: имя проёма, габарит, ename блока (для подсветки).
+                (setq out (cons (list nm eb e) out))
+                ;; Логируем параметры окон/дверей, попавших в зону сетки.
+                (mark:out
+                  (strcat "[INFO] Проём: " (if nm nm "?")
+                          "  X " (rtos (nth 0 eb) 2 1)
+                          ".." (rtos (nth 2 eb) 2 1)
+                          "  Y " (rtos (nth 1 eb) 2 1)
+                          ".." (rtos (nth 3 eb) 2 1)
+                          "  W=" (rtos (- (nth 2 eb) (nth 0 eb)) 2 0)
+                          "  H=" (rtos (- (nth 3 eb) (nth 1 eb)) 2 0))))))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
   (mark:out (strcat "[INFO] Проёмов для фильтра: " (itoa (length out))))
