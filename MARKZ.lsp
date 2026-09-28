@@ -3663,7 +3663,7 @@
 
 (defun mark:fill-opening-block? (name / u)
   (setq u (strcase (if name name "")))
-  (or (wcmatch u "*КН*")
+  (or (or (wcmatch u "*КН*") (wcmatch u "*ОКН*"))
       (wcmatch u "*ДВЕР*")))
 
 (defun mark:fill-vla-bb (e / obj mn mx r a b)
@@ -5435,6 +5435,17 @@
     (mark:out "[INFO] Незамкнутый контур и камеры профиля не заполняю."))
   (reverse boxes))
 
+(defun mark:fill-filter-opening-cells (bbs / out skipped bb)
+  (setq out nil skipped 0)
+  (foreach bb bbs
+    (if (mark:fill-cell-opening? bb)
+      (setq skipped (1+ skipped))
+      (setq out (cons bb out))))
+  (if (> skipped 0)
+    (mark:out (strcat "[INFO] Ячеек с окнами/дверями пропущено: "
+                      (itoa skipped))))
+  (reverse out))
+
 (defun mark:fill-mode-grid-dyn (cells pts / hits boxes bb r)
   (mark:out "Сетка-динамика: выберите стойки и ригели. Только замкнутый контур.")
   (setq hits (mark:fill-pick-frame))
@@ -5443,7 +5454,8 @@
       (mark:out "[INFO] Выбор отменён.")
       (list cells pts))
     (progn
-      (setq boxes (mark:fill-closed-cells hits))
+      (setq boxes (mark:fill-filter-opening-cells
+                     (mark:fill-closed-cells hits)))
       (foreach bb boxes
         (setq r (mark:fill-add cells pts bb)
               cells (car r)
@@ -5492,7 +5504,7 @@
                 "[INFO] Мало осей — увеличьте *mark:fill-tol*.")
               (list cells pts))
             (progn
-              (foreach bb (car r)
+              (foreach bb (mark:fill-filter-opening-cells (car r))
                 (setq r    (mark:fill-add cells pts bb)
                       cells (car r)
                       pts   (cadr r)))
