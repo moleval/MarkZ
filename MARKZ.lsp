@@ -3663,8 +3663,25 @@
 
 (defun mark:fill-opening-block? (name / u)
   (setq u (strcase (if name name "")))
-  (or (or (wcmatch u "*КН*") (wcmatch u "*ОКН*"))
+  ;; EffectiveName: ???? ? ??????????? ???????? ??????? ???????.
+  (or (wcmatch u "*ОКН*")
+      (wcmatch u "*СТВОРК*")
       (wcmatch u "*ДВЕР*")))
+
+(defun mark:fill-dyn-number (pairs keys / pair nm val found key)
+  ;; ????? ???????? ?? ?????????? ?????; ??????? ??????????.
+  (setq found nil)
+  (foreach pair pairs
+    (if (and (null found) (mark:strp (car pair)))
+      (progn
+        (setq nm (strcase (car pair)))
+        (foreach key keys
+          (if (and (null found) (wcmatch nm (strcat "*" key "*")))
+            (progn
+              (setq val (mark:unwrap (cdr pair)))
+              (if (and (numberp val) (> (float val) 0.0))
+                (setq found (float val)))))))))
+  found)
 
 (defun mark:fill-vla-bb (e / obj mn mx r a b)
   (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list e))
@@ -3686,6 +3703,23 @@
         nil))
     nil))
 
+(defun mark:fill-opening-dim-bb (e / obj ip pairs w h a b x y)
+  (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+  (if (or (vl-catch-all-error-p obj) (null obj)) nil
+    (progn
+      (setq ip (mark:ax-get obj "InsertionPoint")
+            pairs (mark:load-dyn-pairs obj)
+            w (mark:fill-dyn-number pairs (list "ШИРИН" "ДЛИН"))
+            h (mark:fill-dyn-number pairs (list "ВЫСОТ" "ДЛИН"))
+            ip (mark:unwrap ip))
+      (if (and (listp ip) (>= (length ip) 2) w h)
+        (progn
+          (setq x (float (car ip)) y (float (cadr ip))
+                a (list (- x (/ w 2.0)) (- y (/ h 2.0)))
+                b (list (+ x (/ w 2.0)) (+ y (/ h 2.0))))
+          (list (car a) (cadr a) (car b) (cadr b)))
+        nil))))
+
 (defun mark:fill-load-openings (/ ss i e ed nm eb out)
   ;; Реальные габариты проёмов получаем напрямую через VLA, без разбора
   ;; динамической геометрии и без побочных повторных расчётов.
@@ -3702,9 +3736,9 @@
         (if (mark:fill-opening-block? nm)
           (progn
             (setq eb (mark:fill-vla-bb e))
-            ;; У динамических INSERT VLA-г-абарит может быть недоступен.
-            ;; Резерв — существующий расчёт габарита сущности.
             (if (null eb) (setq eb (mark:cell-bb e)))
+            ;; ??? ??????????? Bounding Box ?????? ??????? ??????????.
+            (if (null eb) (setq eb (mark:fill-opening-dim-bb e)))
             (if eb (setq out (cons (list nm eb) out))))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
