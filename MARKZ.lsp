@@ -3737,9 +3737,19 @@
           (progn
             (setq eb (mark:fill-vla-bb e))
             (if (null eb) (setq eb (mark:cell-bb e)))
-            ;; ??? ??????????? Bounding Box ?????? ??????? ??????????.
+            ;; Если Bounding Box отсутствует — размеры из динамики.
             (if (null eb) (setq eb (mark:fill-opening-dim-bb e)))
-            (if eb (setq out (cons (list nm eb) out))))))))
+            (if eb
+              (progn
+                (setq out (cons (list nm eb) out))
+                (mark:out
+                  (strcat "[INFO] Проём: " (if nm nm "?")
+                          "  X " (rtos (nth 0 eb) 2 1)
+                          ".." (rtos (nth 2 eb) 2 1)
+                          "  Y " (rtos (nth 1 eb) 2 1)
+                          ".." (rtos (nth 3 eb) 2 1))))
+              (mark:out
+                (strcat "[WARN] Проём без габаритов: " (if nm nm "?")))))))))
   (setq *mark:opening-bbs* out
         *mark:opening-loaded* t)
   (mark:out (strcat "[INFO] Проёмов для фильтра: " (itoa (length out))))
@@ -6134,15 +6144,15 @@
   ;; Два ключа на «Точка» или «Сетка» нельзя: AutoCAD берёт первый.
   ;; Поэтому динамика в списке с цифрой. Команда Точка-динамика — отдельно.
   (mark:out "Точка-динамика: команда, либо 4, либо Д. Буква Т — Точка-мультилинии.")
-  (initget (strcat "Сетка-мультилинии Точка-мультилинии "
+  (initget (strcat "1-Сетка-мультилинии 2-Точка-мультилинии "
                    "3-Сетка-динамика 4-Точка-динамика 5-Сетка-все-типы 6-Точка-все-типы Полилинии "
                    "Динамика-точка Мультилинии-точка 1 2 3 4 5 6 P"))
   (setq kw (getkword
-    "\nРежим [Сетка-мультилинии/Точка-мультилинии/3-Сетка-динамика/4-Точка-динамика/5-Сетка-все-типы/6-Точка-все-типы/Полилинии] <Сетка-мультилинии>: "))
+    "\nРежим [1-Сетка-мультилинии/2-Точка-мультилинии/3-Сетка-динамика/4-Точка-динамика/5-Сетка-все-типы/6-Точка-все-типы/Полилинии] <1-Сетка-мультилинии>: "))
   (cond
-    ((or (null kw) (= kw "Сетка-мультилинии") (= kw "1"))
+    ((or (null kw) (= kw "1-Сетка-мультилинии") (= kw "1"))
      (setq mode "1"))
-    ((or (= kw "Точка-мультилинии") (= kw "Мультилинии-точка") (= kw "2"))
+    ((or (= kw "2-Точка-мультилинии") (= kw "Мультилинии-точка") (= kw "2"))
      (setq mode "2"))
     ((or (= kw "3-Сетка-динамика") (= kw "3"))
      (setq mode "3"))
@@ -6173,7 +6183,7 @@
   (setq forced *mark:fill-force*
         *mark:fill-force* nil)
   (mark:cmd-line
-    "МАРКАЗАПБЛОК — вставка «Заполнение в витраж». Список: Сетка-мультилинии, Точка-мультилинии, 3-Сетка-динамика, 4-Точка-динамика, 5-Сетка-все-типы, 6-Точка-все-типы, Полилинии. Марки не пишет.")
+    "МАРКАЗАПБЛОК — вставка «Заполнение в витраж». Список: 1-Сетка-мультилинии, 2-Точка-мультилинии, 3-Сетка-динамика, 4-Точка-динамика, 5-Сетка-все-типы, 6-Точка-все-типы, Полилинии. Марки не пишет.")
   (mark:reset-state)
   (setq *mark:opening-bbs* nil
         *mark:opening-loaded* nil)
@@ -6450,11 +6460,45 @@
               "|" (rtos (if (numberp sx) sx 1.0) 2 4)
               "|" (rtos (if (numberp sy) sy 1.0) 2 4)))))
 
-(defun c:МАРКАЗАПКОПИИ (/ ss i e key acc groups g keep n doc gone)
-  ;; Копии чтения каркаса лежат на оригинале. Оставляет одну вставку на точку.
-  (mark:out "МАРКАЗАПКОПИИ — убрать копии блоков с той же точкой вставки.")
+(defun mark:copies-group-name ()
+  ;; Уникальное имя, чтобы не конфликтовать с существующей группой.
+  (strcat "МАРКА_КОПИИ_" (menucmd "M=$(edtime,$(getvar,date),HHMMSS)")))
+
+(defun mark:copies-make-group (enames / doc groups grp name vobjs arr e vo)
+  ;; Собирает копии в именованную группу AutoCAD и возвращает её объект.
+  (setq doc    (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
+        groups (if doc (mark:ax-get doc "Groups") nil))
+  (if (null groups)
+    nil
+    (progn
+      (setq name (mark:copies-group-name)
+            grp  (vl-catch-all-apply 'vla-Add (list groups name)))
+      (if (vl-catch-all-error-p grp)
+        nil
+        (progn
+          (setq vobjs nil)
+          (foreach e enames
+            (setq vo (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+            (if (not (vl-catch-all-error-p vo))
+              (setq vobjs (cons vo vobjs))))
+          (if vobjs
+            (progn
+              (setq arr (vlax-make-safearray
+                          vlax-vbObject
+                          (cons 0 (1- (length vobjs)))))
+              (vlax-safearray-fill arr vobjs)
+              (vl-catch-all-apply 'vla-AppendItems (list grp arr))
+              (list name grp))
+            nil))))))
+
+(defun c:МАРКАЗАПКОПИИ (/ ss i e key acc groups g keep n doc extras ss2 grp ans)
+  ;; Копии чтения каркаса лежат на оригинале. Раньше команда сразу удаляла
+  ;; лишние вставки. Теперь она собирает их в группу, подсвечивает и
+  ;; спрашивает пользователя — удалять или оставить.
+  (mark:out "МАРКАЗАПКОПИИ — найти копии блоков с одной точкой вставки.")
   (setq ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT"))))
         acc nil
+        extras nil
         n 0)
   (if (or (vl-catch-all-error-p ss) (null ss))
     (mark:out "[INFO] Вставок нет.")
@@ -6481,8 +6525,8 @@
                   g (list (cdr pair))))))
       (if (and key (> (length g) 1))
         (setq groups (cons g groups)))
-      (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
-      (if doc (mark:ax-invoke-ok doc "StartUndoMark" nil))
+      ;; В каждой группе оставляем «оригинал» (наименьший handle),
+      ;; остальные считаем лишними копиями.
       (foreach g groups
         (setq keep nil)
         (foreach e g
@@ -6492,14 +6536,41 @@
             (setq keep e)))
         (foreach e g
           (if (not (eq e keep))
+            (setq extras (cons e extras)))))
+      (if (null extras)
+        (mark:out "[INFO] Лишних копий не найдено.")
+        (progn
+          (setq n (length extras))
+          ;; Соберём копии в pickset и подсветим их (grip-выделение).
+          (setq ss2 (ssadd))
+          (foreach e extras (ssadd e ss2))
+          (setq grp (mark:copies-make-group extras))
+          (if grp
+            (mark:out
+              (strcat "[INFO] Копии собраны в группу: " (car grp)))
+            (mark:out "[WARN] Не удалось создать группу; только подсветка."))
+          (sssetfirst nil ss2)
+          (mark:out
+            (strcat "[INFO] Найдено лишних копий: " (itoa n)
+                    ". Они подсвечены на чертеже."))
+          (initget "Да Нет")
+          (setq ans (getkword
+            "\nУдалить подсвеченные копии? [Да/Нет] <Нет>: "))
+          (if (= ans "Да")
             (progn
-              (setq gone (vl-catch-all-apply 'entdel (list e)))
-              (if (not (vl-catch-all-error-p gone))
-                (setq n (1+ n)))))))
-      (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
-      (mark:out
-        (strcat "[INFO] Удалено лишних копий: " (itoa n)
-                ". На каждой точке оставлена одна вставка."))))
+              (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
+              (if doc (mark:ax-invoke-ok doc "StartUndoMark" nil))
+              (setq n 0)
+              (foreach e extras
+                (if (not (vl-catch-all-error-p
+                           (vl-catch-all-apply 'entdel (list e))))
+                  (setq n (1+ n))))
+              (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
+              (sssetfirst nil nil)
+              (mark:out
+                (strcat "[INFO] Удалено копий: " (itoa n))))
+            (mark:out
+              "[INFO] Копии оставлены. Решение за пользователем."))))))
   (princ))
 
 (defun c:МАРКАЗАПБЛОК () (mark:fill-main))
@@ -6568,8 +6639,8 @@
   "\nМАРКАРОВКАЗАП  — марки блоков в «Заполнение в витраж»"
   "\nМАРКАЗАПРЯД    — рядовка из блоков «Ряд заполнений»: номера снизу, буквы справа"
   "\nМАРКАЗАПТАБЛ   — ведомость"
-  "\nМАРКАЗАПБЛОК   — Сетка-мультилинии, Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии"
+  "\nМАРКАЗАПБЛОК   — 1-Сетка-мультилинии, 2-Точка-мультилинии, Сетка-динамика, Точка-динамика, Полилинии"
   "\nТочка-динамика — отдельная команда; в списке: 4 или Д"
   "\nМАРКАЗАПТЕСТ   — проверка ячейки на тестовом блоке из линий"
-  "\nМАРКАЗАПКОПИИ — убрать копии динблоков, оставшиеся на оригиналах\n"))
+  "\nМАРКАЗАПКОПИИ — собрать копии динблоков в группу, подсветить и спросить об удалении\n"))
 (princ)
