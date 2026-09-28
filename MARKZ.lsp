@@ -6443,6 +6443,30 @@
           i (1+ i)))
   n)
 
+(defun mark:copy-dyn-key (e / obj pairs parts pair nm val)
+  ;; Строка из всех динамических свойств (включая Видимость), чтобы
+  ;; копией считался только полностью идентичный блок.
+  (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+  (if (or (vl-catch-all-error-p obj) (null obj))
+    ""
+    (progn
+      (setq pairs (mark:load-dyn-pairs obj)
+            parts nil)
+      (foreach pair pairs
+        (if (mark:strp (car pair))
+          (progn
+            (setq nm  (strcase (car pair))
+                  val (mark:unwrap (cdr pair))
+                  parts (cons (strcat nm "="
+                                (cond ((numberp val) (rtos (float val) 2 4))
+                                      ((mark:strp val) val)
+                                      (t (vl-princ-to-string val))))
+                              parts))))
+        )
+      ;; Сортировка, чтобы порядок свойств не влиял на ключ.
+      (setq parts (vl-sort parts '(lambda (a b) (< a b))))
+      (apply 'strcat (mapcar '(lambda (x) (strcat "|" x)) parts)))))
+
 (defun mark:copy-key (e / ed p nm rot sx sy)
   (setq ed (entget e)
         p (if ed (cdr (assoc 10 ed)) nil)
@@ -6458,7 +6482,9 @@
               "|" (rtos (float (cadr p)) 2 2)
               "|" (rtos (if (numberp rot) rot 0.0) 2 4)
               "|" (rtos (if (numberp sx) sx 1.0) 2 4)
-              "|" (rtos (if (numberp sy) sy 1.0) 2 4)))))
+              "|" (rtos (if (numberp sy) sy 1.0) 2 4)
+              ;; полное совпадение динамики, включая Видимость
+              (mark:copy-dyn-key e)))))
 
 (defun mark:copies-group-name ()
   ;; Уникальное имя, чтобы не конфликтовать с существующей группой.
@@ -6491,10 +6517,12 @@
               (list name grp))
             nil))))))
 
-(defun c:МАРКАЗАПКОПИИ (/ ss i e key acc groups g keep n doc extras ss2 grp ans)
-  ;; Копии чтения каркаса лежат на оригинале. Раньше команда сразу удаляла
-  ;; лишние вставки. Теперь она собирает их в группу, подсвечивает и
-  ;; спрашивает пользователя — удалять или оставить.
+(defun c:МАРКАЗАПКОПИИ (/ ss i e key acc groups g keep n extras ss2 grp)
+  ;; Ручной поиск по команде пользователя. Копии чтения каркаса лежат на
+  ;; оригинале. Команда собирает лишние вставки в группу и подсвечивает их,
+  ;; НО ничего не удаляет — решение об удалении принимает пользователь.
+  ;; Внутренние процедуры, которым нужно создавать/удалять такие элементы,
+  ;; работают отдельно и этой командой не затрагиваются.
   (mark:out "МАРКАЗАПКОПИИ — найти копии блоков с одной точкой вставки.")
   (setq ss (vl-catch-all-apply 'ssget (list "X" (list (cons 0 "INSERT"))))
         acc nil
@@ -6549,28 +6577,14 @@
             (mark:out
               (strcat "[INFO] Копии собраны в группу: " (car grp)))
             (mark:out "[WARN] Не удалось создать группу; только подсветка."))
+          ;; Ручной поиск: только собираем в группу и подсвечиваем.
+          ;; Удаление — на усмотрение пользователя (Delete/Стереть вручную).
           (sssetfirst nil ss2)
           (mark:out
             (strcat "[INFO] Найдено лишних копий: " (itoa n)
-                    ". Они подсвечены на чертеже."))
-          (initget "Да Нет")
-          (setq ans (getkword
-            "\nУдалить подсвеченные копии? [Да/Нет] <Нет>: "))
-          (if (= ans "Да")
-            (progn
-              (setq doc (mark:ax-get (vlax-get-acad-object) "ActiveDocument"))
-              (if doc (mark:ax-invoke-ok doc "StartUndoMark" nil))
-              (setq n 0)
-              (foreach e extras
-                (if (not (vl-catch-all-error-p
-                           (vl-catch-all-apply 'entdel (list e))))
-                  (setq n (1+ n))))
-              (if doc (mark:ax-invoke-ok doc "EndUndoMark" nil))
-              (sssetfirst nil nil)
-              (mark:out
-                (strcat "[INFO] Удалено копий: " (itoa n))))
-            (mark:out
-              "[INFO] Копии оставлены. Решение за пользователем."))))))
+                    ". Собраны в группу и подсвечены."))
+          (mark:out
+            "[INFO] Копии не удалялись. При необходимости удалите их вручную.")))))
   (princ))
 
 (defun c:МАРКАЗАПБЛОК () (mark:fill-main))
