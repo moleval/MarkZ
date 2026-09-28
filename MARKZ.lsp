@@ -3661,12 +3661,34 @@
 ;;; ---- список ячеек + дедуп --------------------------------------------
 
 
-(defun mark:fill-opening-block? (name / u)
-  (setq u (strcase (if name name "")))
-  ;; EffectiveName: ???? ? ??????????? ???????? ??????? ???????.
-  (or (wcmatch u "*ОКН*")
-      (wcmatch u "*СТВОРК*")
-      (wcmatch u "*ДВЕР*")))
+;; Маски имён проёмов (окна/двери). По EffectiveName блока.
+;; Реальные имена в проекте: окно «КПТ60», дверь «...КПТ74...», а также
+;; общепринятые «ОКНО», «створка», «ДВЕРЬ». Заполнения («Кассета» и т.п.)
+;; под маски не попадают. Список можно дополнять без правки кода.
+(if (null *mark:opening-masks*)
+  (setq *mark:opening-masks*
+    (list "*ОКН*" "*СТВОР*" "*ДВЕР*" "*КПТ*")))
+
+;; Маски-исключения: имена, которые НЕ считать проёмом, даже если они
+;; случайно совпали с маской выше (например, глухие заполнения).
+(if (null *mark:opening-skip-masks*)
+  (setq *mark:opening-skip-masks* (list "*КАССЕТ*")))
+
+(defun mark:fill-opening-block? (name / u hit m)
+  (setq u (strcase (if name name "")) hit nil)
+  (if (= u "")
+    nil
+    (progn
+      ;; сначала явные исключения
+      (foreach m *mark:opening-skip-masks*
+        (if (wcmatch u (strcase m)) (setq hit 'skip)))
+      (if (eq hit 'skip)
+        nil
+        (progn
+          (foreach m *mark:opening-masks*
+            (if (and (null hit) (wcmatch u (strcase m)))
+              (setq hit t)))
+          hit)))))
 
 (defun mark:fill-dyn-number (pairs keys / pair nm val found key)
   ;; ????? ???????? ?? ?????????? ?????; ??????? ??????????.
