@@ -3667,16 +3667,23 @@
       (wcmatch u "*ДВЕР*")))
 
 (defun mark:fill-vla-bb (e / obj mn mx r a b)
-  (setq obj (mark:vla e)
-        mn nil mx nil
-        r (if obj
-            (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'mn 'mx))
-            nil))
-  (if (and r (not (vl-catch-all-error-p r)) mn mx)
+  (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list e))
+        mn nil mx nil)
+  (if (and (not (vl-catch-all-error-p obj)) obj)
     (progn
-      (setq a (vlax-safearray->list mn)
-            b (vlax-safearray->list mx))
-      (list (car a) (cadr a) (car b) (cadr b)))
+      ;; GetBoundingBox является void-методом: успешный результат может быть nil.
+      (setq r (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'mn 'mx)))
+      (if (and (not (vl-catch-all-error-p r)) mn mx)
+        (progn
+          (setq a (vl-catch-all-apply 'vlax-safearray->list (list mn))
+                b (vl-catch-all-apply 'vlax-safearray->list (list mx)))
+          (if (and (not (vl-catch-all-error-p a))
+                   (not (vl-catch-all-error-p b))
+                   (>= (length a) 2) (>= (length b) 2))
+            (list (float (car a)) (float (cadr a))
+                  (float (car b)) (float (cadr b)))
+            nil))
+        nil))
     nil))
 
 (defun mark:fill-load-openings (/ ss i e ed nm eb out)
