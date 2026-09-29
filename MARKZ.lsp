@@ -109,7 +109,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.5")
+(setq *mark:rev*    "–ед. 48.6")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4171,9 +4171,10 @@
 
 (defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks
                                        seen n-open axes vs hs items boxes
-                                       polys n-poly bb msegs rblocks n-hidden
+                                       polys n-poly n-polyo n-line
+                                       bb msegs rblocks n-hidden
                                        vs2 out glaz)
-  (mark:out "5-—етка-все-типы: блоки, мультилинии, линии, полилинии, дуги.")
+  (mark:out "5-—етка-все-типы: каркас Ч блоки (динамика) и мультилинии; отрезки, дуги, полилинии Ч не каркас (–ед. 48.6).")
   (mark:out "¬ыберите объекты каркаса рамкой. Enter Ч отмена.")
   (setq *mark:fill-geo* nil)
   (setq ss (mark:fill-all-ss))
@@ -4193,6 +4194,8 @@
             rblocks nil
             glaz    nil
             n-poly  0
+            n-polyo 0
+            n-line  0
             n-hidden 0
             n-open  0
             i       (sslength ss))
@@ -4222,23 +4225,26 @@
                        (wcmatch (strcase nm) "*–»√≈Ћ№*"))
                 (setq rblocks (cons e rblocks))))))
           ;; –ед. 48.4: замкнута€ полилини€ Ч не каркас и не €чейка.
-          ;; —етка Ч по динамике, мультилини€м и лини€м каркаса;
+          ;; —етка Ч по динамике и мультилини€м (–ед. 48.6).
           ;; контур полилинии Ч только режимы точки и 7-ѕолилини€.
           ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
            (setq n-poly (1+ n-poly)))
-          ((member typ '("LINE" "ARC" "MLINE"))
+          ;; –ед. 48.6: отрезки и дуги Ч не каркас (решение заказчика
+          ;; 2026-09-29): в режимах сетки каркас Ч только мультилинии
+          ;; и динамика; полуширина отрезка была допущением 25 мм.
+          ((member typ '("LINE" "ARC"))
+           (setq n-line (1+ n-line)))
+          ((= typ "MLINE")
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
-             (setq segs (append r segs)))
-           ;; шкала: только MLINE (зеркало MarkZV, *mk:seg-types*)
-           (if (and (= typ "MLINE") r (not (vl-catch-all-error-p r)))
-             (setq msegs (append r msegs))))
-          ;; Ќезамкнута€ полилини€ и старый POLYLINE Ч рамка из линий:
-          ;; отрезки с полушириной 0, отступ 25 не нужен.
+             (progn
+               (setq segs (append r segs))
+               ;; шкала: только MLINE (зеркало MarkZV, *mk:seg-types*)
+               (setq msegs (append r msegs)))))
+          ;; –ед. 48.6: незамкнута€ полилини€ и старый POLYLINE Ч не
+          ;; каркас режима сетки; контур Ч режимы точки (2/6) и 7.
           ((member typ '("LWPOLYLINE" "POLYLINE"))
-           (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
-           (if (and r (not (vl-catch-all-error-p r)))
-             (setq segs (append (mark:fill-lines-hw0 r) segs))))))
+           (setq n-polyo (1+ n-polyo)))))
       (if (> n-hidden 0)
         (mark:out
           (strcat "[INFO] ѕропущено на скрытых сло€х: " (itoa n-hidden)
@@ -4307,6 +4313,15 @@
         (mark:out
           (strcat "[INFO] «амкнутых полилиний пропущено: " (itoa n-poly)
                   " Ч не каркас и не €чейки.")))
+      ;; –ед. 48.6: пропущенные отрезки/дуги и полилинии Ч в лог.
+      (if (> n-polyo 0)
+        (mark:out
+          (strcat "[INFO] Ќезамкнутых полилиний пропущено: " (itoa n-polyo)
+                  " Ч не каркас режима сетки (контур Ч режимы 2/6/7).")))
+      (if (> n-line 0)
+        (mark:out
+          (strcat "[INFO] ќтрезков и дуг пропущено: " (itoa n-line)
+                  " Ч не каркас (только мультилинии и динамика).")))
       ;; Ўкала Ѕлок 1: длины ригелей в свету Ч зеркало MarkZV –ед. 3.7.
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
       ;; ‘ильтр проЄмов: зона сетки, лог, пропуск €чеек с окнами/двер€ми.
@@ -7229,7 +7244,7 @@
 ;; секции/€русы на месте (решение заказчика 2026-09-29).
 (defun mark:sec-standalone (/ ss i e ed typ nm r segs blocks msegs rblocks
                                seen polys axes vs hs items boxes bb n-poly
-                               vs2 out ins hit cnt glaz)
+                               n-polyo n-line vs2 out ins hit cnt glaz)
   (mark:out "ƒл€ расчЄта секций выберите каркас рамкой. Enter Ч отмена.")
   (setq ss (vl-catch-all-apply 'ssget nil))
   (if (or (vl-catch-all-error-p ss) (null ss))
@@ -7245,6 +7260,8 @@
             polys   nil
             glaz    nil
             n-poly  0
+            n-polyo 0
+            n-line  0
             i       (sslength ss))
       (while (> i 0)
         (setq i   (1- i)
@@ -7272,17 +7289,19 @@
           ;; (контур полилинии Ч только режимы точки и 7-ѕолилини€).
           ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
            (setq n-poly (1+ n-poly)))
-          ((member typ '("LINE" "ARC" "MLINE"))
+          ;; –ед. 48.6: отрезки и дуги Ч не каркас; каркас Ч только
+          ;; мультилинии и динамика (как в режиме 5 ћј– ј«јѕ).
+          ((member typ '("LINE" "ARC"))
+           (setq n-line (1+ n-line)))
+          ((= typ "MLINE")
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
              (progn
                (setq segs (append r segs))
-               (if (= typ "MLINE")
-                 (setq msegs (append r msegs))))))
+               (setq msegs (append r msegs)))))
+          ;; –ед. 48.6: незамкнута€ полилини€ и POLYLINE Ч не каркас.
           ((member typ '("LWPOLYLINE" "POLYLINE"))
-           (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
-           (if (and r (not (vl-catch-all-error-p r)))
-             (setq segs (append (mark:fill-lines-hw0 r) segs))))))
+           (setq n-polyo (1+ n-polyo)))))
       ;; –ед. 48.3: Ђјтрибуты витражаї из выбора каркаса Ч префикс марок
       (if glaz
         (setq *mark:glazings* (reverse glaz)))
@@ -7306,6 +7325,15 @@
         (mark:out
           (strcat "[INFO] «амкнутых полилиний пропущено: " (itoa n-poly)
                   " Ч не каркас и не €чейки.")))
+      ;; –ед. 48.6: пропущенные отрезки/дуги и полилинии Ч в лог.
+      (if (> n-line 0)
+        (mark:out
+          (strcat "[INFO] ќтрезков и дуг пропущено: " (itoa n-line)
+                  " Ч не каркас (только мультилинии и динамика).")))
+      (if (> n-polyo 0)
+        (mark:out
+          (strcat "[INFO] Ќезамкнутых полилиний пропущено: " (itoa n-polyo)
+                  " Ч не каркас (контур Ч режимы 2/6/7).")))
       (setq vs2 (if (and vs hs) (mark:sec-columns vs hs) nil))
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
       ;; сопоставление: точка вставки блока = угол €чейки
@@ -8030,11 +8058,11 @@
 (mark:test-parens)
 (princ (strcat
   "\n[MARKZ] «агружен " *mark:rev*
-  "\nћј– ј«јѕ       Ч полный цикл: сетка или готовые заполнени€"
+  "\nћј– ј«јѕ       Ч полный цикл: сетка или готовые заполнени€ (каркас: мультилинии + динамика)"
   "\nћј– ј–ќ¬ ј«јѕ  Ч марки блоков в Ђ«аполнение в витражї"
   "\nћј– ј«јѕ–яƒ    Ч р€довка из блоков Ђ–€д заполненийї: номера снизу, буквы справа"
   "\nћј– ј«јѕ“јЅЋ   Ч ведомость"
-  "\nћј– ј«јѕЅЋќ    Ч 1-—етка-мультилинии, 2-“очка-мультилинии, —етка-динамика, “очка-динамика, 7-ѕолилини€"
+  "\nћј– ј«јѕЅЋќ    Ч вставка по €чейкам: 1/2 мультилинии, 3/4 динамика, 5/6 все-типы, 7-ѕолилини€"
   "\n“очка-динамика Ч отдельна€ команда; в списке: 4 или ƒ"
   "\nћј– ј«јѕ“≈—“   Ч проверка €чейки на тестовом блоке из линий"
   "\nћј– ј«јѕ ќѕ»» Ч собрать полные дубли объектов в группу и подсветить (без удалени€)"
