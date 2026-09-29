@@ -109,7 +109,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.6")
+(setq *mark:rev*    "–ед. 48.7")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -205,6 +205,20 @@
        (rtos (float v) 2 8)))
     ((mark:strp v) (strcat "\"" v "\""))
     (t (vl-princ-to-string (mark:unwrap v)))))
+
+(defun mark:mm-key (v / u)
+  ;; –ед. 48.7: размер в целых мм (ключ сортировки); nil Ч не число.
+  (setq u (mark:unwrap v))
+  (if (numberp u)
+    (mark:round1 u)
+    nil))
+
+(defun mark:fmt-mm (v / u)
+  ;; –ед. 48.7: печать размеров в целых мм Ч без хвостов вида 409.99999847.
+  (setq u (mark:unwrap v))
+  (if (numberp u)
+    (rtos (mark:round1 u) 2 0)
+    (mark:fmt-raw v)))
 
 (defun mark:numval (v / u)
   (setq u (mark:unwrap v))
@@ -1538,9 +1552,9 @@
                          "Ч"))
              (mark:out
                (strcat "Ѕлок " (mark:rjust (itoa (mark:rec-get r 'idx)) 3) ": "
-                       (mark:rjust (mark:fmt-raw (mark:rec-get r 'width)) 5)
+                       (mark:rjust (mark:fmt-mm (mark:rec-get r 'width)) 5)
                        " x "
-                       (mark:rjust (mark:fmt-raw (mark:rec-get r 'height)) 5)
+                       (mark:rjust (mark:fmt-mm (mark:rec-get r 'height)) 5)
                        " / "
                        vis
                        (substr "              " 1
@@ -4018,7 +4032,7 @@
                     (rtos (nth 0 bb) 2 1) "," (rtos (nth 1 bb) 2 1)
                     " (W=" (rtos (- (nth 2 bb) (nth 0 bb)) 2 0)
                     " H=" (rtos (- (nth 3 bb) (nth 1 bb)) 2 0)
-                    ") Ч проверьте вручную."))
+                    "). ячейка пропущена как проЄмна€ Ч проверьте вручную."))
           (mark:note-warning)
           (if (and hit-e (not (member hit-e *mark:opening-partial*)))
             (setq *mark:opening-partial* (cons hit-e *mark:opening-partial*)))))))
@@ -6016,7 +6030,7 @@
     (setq iL (1+ iL)))
   (mark:out
     (strcat "[INFO] «амкнутых €чеек: " (itoa (length boxes))
-            ". ѕропуск: один блок " (itoa n-own)
+            ". ќтклонено кандидатов (не €чейки): один блок " (itoa n-own)
             ", неполный контур " (itoa n-open) "."))
   (if (null boxes)
     (mark:out "[INFO] Ќезамкнутый контур и камеры профил€ не заполн€ю."))
@@ -7390,7 +7404,8 @@
 
 ;; TEST 16: таблицы секций и €русов (“« 3.0, І7.1)
 (defun mark:test-16 (/ rows lines r n row q size src subs cnt div k sw-cnt
-                        lrows llines letter lsize lsubs lhidx sh-cnt ln)
+                        lrows llines letter lsize lsubs lhidx sh-cnt ln
+                        wkeys wk sw hkeys hk sl)
   (mark:out "")
   (mark:out "[TEST 16] —екции и €русы")
   (setq rows nil)
@@ -7415,16 +7430,31 @@
           size (mark:rec-get r 'secw)
           src  (mark:sec-src-of n)
           subs nil
+          wkeys nil
           cnt  0)
     (foreach q (nth 1 row)
       (setq cnt (1+ cnt))
       (if (numberp (mark:rec-get q 'subw))
         (progn
           (setq sw-cnt (1+ sw-cnt))
-          (setq k (strcat (mark:fmt-raw (mark:rec-get q 'width))
-                          " (." (itoa (mark:rec-get q 'subw)) ")"))
-          (if (not (member k subs))
-            (setq subs (cons k subs))))))
+          ;; –ед. 48.7: ключ Ч округлЄнна€ ширина; подъ€чейки печатаютс€
+          ;; по возрастанию, как и индексы .1/.2 (было Ч в пор€дке записей).
+          (setq k (mark:mm-key (mark:rec-get q 'width)))
+          (if (and k (not (member k wkeys)))
+            (setq wkeys (cons k wkeys))))))
+    (setq wkeys (mark:sort-unique wkeys)
+          subs  nil)
+    (foreach wk wkeys
+      (setq sw nil)
+      (foreach q (nth 1 row)
+        (if (and (null sw)
+                 (numberp (mark:rec-get q 'subw))
+                 (= wk (mark:mm-key (mark:rec-get q 'width))))
+          (setq sw (mark:rec-get q 'subw))))
+      (if sw
+        (setq subs (cons (strcat (rtos wk 2 0)
+                                 " (." (itoa sw) ")") subs))))
+    (setq subs (reverse subs))
     (if subs
       (setq div (1+ div)))
     (setq lines
@@ -7433,7 +7463,7 @@
                     "  " src
                     "  "
                     (if subs
-                      (mark:sec-join (reverse subs))
+                      (mark:sec-join subs)
                       "Ч")
                     "  заполнений: " (itoa cnt))
             lines)))
@@ -7466,22 +7496,37 @@
           letter (if (mark:rec-get r 'letter) (mark:rec-get r 'letter) "?")
           lsize  (mark:rec-get r 'tierh)
           lsubs  nil
+          hkeys  nil
           cnt    0)
     (foreach q (nth 1 row)
       (setq cnt (1+ cnt))
       (if (mark:rec-get q 'subl)
         (progn
           (setq sh-cnt (1+ sh-cnt))
-          (setq k (strcat (mark:fmt-raw (mark:rec-get q 'height))
-                          " (" (mark:rec-get q 'subl) ")"))
-          (if (not (member k lsubs))
-            (setq lsubs (cons k lsubs))))))
+          ;; –ед. 48.7: ключ Ч округлЄнна€ высота; по возрастанию,
+          ;; как и литеры .а/.б (было Ч в пор€дке записей).
+          (setq k (mark:mm-key (mark:rec-get q 'height)))
+          (if (and k (not (member k hkeys)))
+            (setq hkeys (cons k hkeys))))))
+    (setq hkeys (mark:sort-unique hkeys)
+          lsubs nil)
+    (foreach hk hkeys
+      (setq sl nil)
+      (foreach q (nth 1 row)
+        (if (and (null sl)
+                 (mark:rec-get q 'subl)
+                 (= hk (mark:mm-key (mark:rec-get q 'height))))
+          (setq sl (mark:rec-get q 'subl))))
+      (if sl
+        (setq lsubs (cons (strcat (rtos hk 2 0)
+                                  " (" sl ")") lsubs))))
+    (setq lsubs (reverse lsubs))
     (setq llines
       (cons (strcat "  " (mark:rjust letter 4)
                     "  " (mark:rjust (mark:fmt-raw lsize) 6)
                     "  "
                     (if lsubs
-                      (mark:sec-join (reverse lsubs))
+                      (mark:sec-join lsubs)
                       "Ч")
                     "  заполнений: " (itoa cnt))
             llines)))
