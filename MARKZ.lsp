@@ -109,7 +109,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.4")
+(setq *mark:rev*    "–ед. 48.5")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1478,21 +1478,37 @@
       (if (= out "") k (strcat out "+" k))))
   out)
 
-(defun mark:validate-marks (/ bad sorted r shown total lines vis)
+(defun mark:validate-marks (/ bad nogeo sorted r shown total lines vis)
   (mark:out "")
-  (setq bad nil)
+  ;; –ед. 48.5: без гео секции Ч предупреждение (блок уже помечен
+  ;; Ђвне €чеекї в standalone), не блокирует запись остальных марок.
+  (setq bad   nil
+        nogeo nil)
   (foreach r *mark:records*
     (if (null (mark:rec-get r 'mark-new))
-      (setq bad
-        (cons
-          (strcat "Ѕлок є" (itoa (mark:rec-get r 'idx)) ": марка не сформирована"
-                  (cond
-                    ((null (mark:rec-get r 'secw)) " Ч нет гео секции.")
-                    ((null (mark:rec-get r 'letter)) " Ч нет буквы €руса.")
-                    ((null (mark:rec-get r 'hnum)) " Ч нет номера шкалы.")
-                    (t ".")))
-          bad))))
-  (setq bad (reverse bad))
+      (if (null (mark:rec-get r 'secw))
+        (setq nogeo
+          (cons
+            (strcat "Ѕлок є" (itoa (mark:rec-get r 'idx))
+                    ": нет гео секции Ч марка не формируетс€.")
+            nogeo))
+        (setq bad
+          (cons
+            (strcat "Ѕлок є" (itoa (mark:rec-get r 'idx)) ": марка не сформирована"
+                    (cond
+                      ((null (mark:rec-get r 'letter)) " Ч нет буквы €руса.")
+                      ((null (mark:rec-get r 'hnum)) " Ч нет номера шкалы.")
+                      (t ".")))
+            bad)))))
+  (setq nogeo (reverse nogeo)
+        bad   (reverse bad))
+  (if nogeo
+    (progn
+      (mark:out
+        (strcat "[TEST 13] Ѕез гео секции: " (itoa (length nogeo))
+                " Ч марки таким блокам не пишутс€ (предупреждение)."))
+      (mark:print-limited nogeo)
+      (mark:note-warning)))
   (cond
     (bad
      (progn
@@ -1512,7 +1528,8 @@
        (setq total (length sorted)
              shown 0)
        (foreach r sorted
-         (if (< shown *mark:test13-show*)
+         (if (and (< shown *mark:test13-show*)
+                  (mark:rec-get r 'mark-new))
            (progn
              (setq shown (1+ shown))
              ;; ќдна строка на блок, колонки выровнены по ширине.
@@ -1535,7 +1552,11 @@
            (strcat "... (показаны первые " (itoa *mark:test13-show*)
                    " из " (itoa total) ")")))
        (mark:out (strcat "¬сего блоков: " (itoa total)))
-       (mark:out (strcat "—формировано марок: " (itoa total)))))))
+       (mark:out (strcat "—формировано марок: "
+                         (itoa (- total (length nogeo)))))
+       (if nogeo
+         (mark:out (strcat "ѕропущено без гео: "
+                           (itoa (length nogeo)))))))))
 
 ;;;--------------------- TEST 14 Ч PRE-CHECK ---------------------------
 
