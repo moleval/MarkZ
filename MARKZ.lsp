@@ -109,7 +109,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.1")
+(setq *mark:rev*    "–ед. 48.2")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1252,7 +1252,8 @@
   ;; новый список) Ч пишем *mark:records* обратно перед вторым проходом.
   (setq *mark:records* (reverse out)
         mapW            (mark:map-sort mapW)
-        mapH            (mark:map-sort mapH))
+        mapH            (mark:map-sort mapH)
+        out             nil)
   (foreach r *mark:records*
     (setq secw (mark:rec-get r 'secw)
           tierh (mark:rec-get r 'tierh))
