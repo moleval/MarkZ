@@ -109,7 +109,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.0")
+(setq *mark:rev*    "–ед. 48.1")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1241,12 +1241,18 @@
         (if (and iw (not (mark:same-num? w (nth 0 geo))))
           (setq mapW (mark:map-add mapW iw w)))
         (if (and ih (not (mark:same-num? h (nth 1 geo))))
-          (setq mapH (mark:map-add mapH ih h))))
-      (setq r (mark:rec-put r 'secw nil)
-            r (mark:rec-put r 'tierh nil)
-            r (mark:rec-put r 'hidx nil))))
-  (setq mapW (mark:map-sort mapW)
-        mapH (mark:map-sort mapH))
+          (setq mapH (mark:map-add mapH ih h)))
+        (setq out (cons r out)))
+      (progn
+        (setq r (mark:rec-put r 'secw nil)
+              r (mark:rec-put r 'tierh nil)
+              r (mark:rec-put r 'hidx nil))
+        (setq out (cons r out)))))
+  ;; –ед. 48.1: foreach не сохран€ет изменЄнные записи (rec-put возвращает
+  ;; новый список) Ч пишем *mark:records* обратно перед вторым проходом.
+  (setq *mark:records* (reverse out)
+        mapW            (mark:map-sort mapW)
+        mapH            (mark:map-sort mapH))
   (foreach r *mark:records*
     (setq secw (mark:rec-get r 'secw)
           tierh (mark:rec-get r 'tierh))
@@ -1476,17 +1482,21 @@
   (setq bad nil)
   (foreach r *mark:records*
     (if (null (mark:rec-get r 'mark-new))
-      (setq bad (cons (mark:rec-get r 'idx) bad))))
+      (setq bad
+        (cons
+          (strcat "Ѕлок є" (itoa (mark:rec-get r 'idx)) ": марка не сформирована"
+                  (cond
+                    ((null (mark:rec-get r 'secw)) " Ч нет гео секции.")
+                    ((null (mark:rec-get r 'letter)) " Ч нет буквы €руса.")
+                    ((null (mark:rec-get r 'hnum)) " Ч нет номера шкалы.")
+                    (t ".")))
+          bad))))
   (setq bad (reverse bad))
   (cond
     (bad
      (progn
        (mark:out "[TEST 13] ѕроверка формировани€ марок Ч ERROR")
-       (setq lines nil)
-       (foreach idx bad
-         (setq lines
-           (cons (strcat "Ѕлок є" (itoa idx) ": марка не сформирована.") lines)))
-       (mark:print-limited (reverse lines))
+       (mark:print-limited bad)
        (mark:note-error)))
     (t
      (progn
@@ -4268,8 +4278,8 @@
                      (> (- (nth 3 bb) (nth 1 bb)) *mark:fill-max-h*)))
           (setq n-poly (1+ n-poly))
           (setq boxes (cons (append bb
-                                    (list (- (nth 2 bb) (nth 0 bb))
-                                          (- (nth 3 bb) (nth 1 bb))))
+                                    (list (mark:round1 (- (nth 2 bb) (nth 0 bb)))
+                                          (mark:round1 (- (nth 3 bb) (nth 1 bb)))))
                             boxes))))
       (if polys
         (mark:out
@@ -6936,7 +6946,7 @@
         x1 (nth 2 bb)
         y1 (nth 3 bb))
   (if (or (null vs2) (null hs))
-    (list (- x1 x0) (- y1 y0))
+    (list (mark:round1 (- x1 x0)) (mark:round1 (- y1 y0)))
     (progn
       (setq cols (mark:fill-cluster-items vs2)
             xl    nil
@@ -6972,7 +6982,7 @@
           (setq yt f)))
       (if (null yb) (setq yb y0))
       (if (null yt) (setq yt y1))
-      (list (- xr xl) (- yt yb)))))
+      (list (mark:round1 (- xr xl)) (mark:round1 (- yt yb))))))
 
 ;; «начение динамического свойства по маске имени
 (defun mark:dyn-by-mask (e mask / pairs p v out)
@@ -7270,8 +7280,8 @@
                      (> (- (nth 3 bb) (nth 1 bb)) *mark:fill-max-h*)))
           (setq n-poly (1+ n-poly))
           (setq boxes (cons (append bb
-                                    (list (- (nth 2 bb) (nth 0 bb))
-                                          (- (nth 3 bb) (nth 1 bb))))
+                                    (list (mark:round1 (- (nth 2 bb) (nth 0 bb)))
+                                          (mark:round1 (- (nth 3 bb) (nth 1 bb)))))
                             boxes))))
       (setq vs2 (if (and vs hs) (mark:sec-columns vs hs) nil))
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
