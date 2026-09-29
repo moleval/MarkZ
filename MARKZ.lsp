@@ -74,6 +74,11 @@
 (setq *mark:specials*
   '(("Стемалит" . "стм")
     ("Сэндвич" . "снд")))
+
+;; Ред. 48.0: секции/ярусы и шкала «в свету» (зеркало MarkZV)
+(setq *mark:fill-geo*    nil)     ;; (ename . (ширина секции высота яруса))
+(setq *mark:scale1*      nil)     ;; Блок 1: ключи длин ригелей, мм
+(setq *mark:scale-final* nil)     ;; ((размер источник) ...), Р/З/РЗ
 ;; Сколько блоков показывать в TEST 13
 (setq *mark:test13-show*  10)
 ;; Сколько строк ошибок показывать в одном тесте (остальное — сводка)
@@ -104,7 +109,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 47.8")
+(setq *mark:rev*    "Ред. 48.0")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -142,7 +147,10 @@
           *mark:prefix*        ""
           *mark:prefix-found*  nil
           *mark:widths*        nil
-          *mark:heights*       nil)))
+          *mark:heights*       nil
+          *mark:fill-geo*      nil
+          *mark:scale1*        nil
+          *mark:scale-final*   nil)))
 
 (mark:reset-state)
 
@@ -1084,19 +1092,32 @@
 
 ;;;--------------------- TEST 09/10/11 — данные и нумерация ------------
 
-(defun mark:test-data (/ wlist hlist)
-  (setq wlist
+(defun mark:test-data (/ wlist hlist geo th)
+  (if *mark:fill-geo*
+    (progn
+      ;; Ред. 48.0: номера — шкала «в свету» (ригели + секции),
+      ;; буквы — высоты ярусов.
+      (setq *mark:scale-final* (mark:sec-scale-full))
+      (setq wlist nil)
+      (foreach geo *mark:scale-final*
+        (setq wlist (cons (float (nth 0 geo)) wlist)))
+      (setq wlist (reverse wlist)
+            th    nil)
+      (foreach geo *mark:fill-geo*
+        (if (and (cdr geo) (numberp (caddr geo)))
+          (setq th (cons (caddr geo) th))))
+      (setq hlist (mark:sort-unique (mark:positives th)))
+      (setq *mark:widths*  wlist
+            *mark:heights* hlist))
+    (progn
+      (setq wlist
         (mark:sort-unique
-          (mark:positives
-            (mapcar (function (lambda (r) (mark:rec-get r 'width)))
-                    *mark:records*))))
-  (setq hlist
+          (mark:positives (mark:recs-widths))))
+      (setq hlist
         (mark:sort-unique
-          (mark:positives
-            (mapcar (function (lambda (r) (mark:rec-get r 'height)))
-                    *mark:records*))))
-  (setq *mark:widths*  wlist
-        *mark:heights* hlist)
+          (mark:positives (mark:recs-heights))))
+      (setq *mark:widths*  wlist
+            *mark:heights* hlist)))
 
   ;; TEST 09
   (mark:out "")
@@ -1105,14 +1126,14 @@
      (progn
        (mark:out "[TEST 09] Уникальные размеры — OK")
        (mark:out "")
-       (mark:out (strcat "Уникальных ширин: " (itoa (length wlist))))
-       (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))
+       (mark:out (strcat "Размеров шкалы (в свету): " (itoa (length wlist))))
+       (mark:out (strcat "Ярусов (буквы): " (itoa (length hlist))))
        (mark:out "")
        (mark:out
-         (strcat "Ширина: " (mark:fmt-raw (car wlist))
+         (strcat "Шкала: " (mark:fmt-raw (car wlist))
                  " ... " (mark:fmt-raw (car (reverse wlist)))))
        (mark:out
-         (strcat "Высота: " (mark:fmt-raw (car hlist))
+         (strcat "Ярус: " (mark:fmt-raw (car hlist))
                  " ... " (mark:fmt-raw (car (reverse hlist)))))))
     (t
      (progn
@@ -1120,25 +1141,25 @@
        (mark:out "Нет корректных значений ширины/высоты.")
        (mark:note-error))))
 
-  ;; TEST 10 — буквы по высотам. После списка продолжаем АА, АБ, … БА, ББ.
+  ;; TEST 10 — буквы по ярусам. После списка продолжаем АА, АБ, … БА, ББ.
   (mark:out "")
   (mark:out "[TEST 10] Буквенная маркировка — OK")
-  (mark:out (strcat "Уникальных высот: " (itoa (length hlist))))
+  (mark:out (strcat "Ярусов: " (itoa (length hlist))))
   (mark:out
     (strcat "Букв в списке: " (itoa (length *mark:letters*))
             ". Дальше АА, АБ, … БА, ББ."))
 
-  ;; TEST 11 — номера по ширинам
+  ;; TEST 11 — номера по шкале секций
   (mark:out "")
   (cond
     ((> (length wlist) 0)
      (progn
-       (mark:out "[TEST 11] Нумерация ширин — OK")
-       (mark:out (strcat "Уникальных ширин: " (itoa (length wlist))))))
+       (mark:out "[TEST 11] Нумерация секций — OK")
+       (mark:out (strcat "Размеров шкалы: " (itoa (length wlist))))))
     (t
      (progn
-       (mark:out "[TEST 11] Нумерация ширин — ERROR")
-       (mark:out "Уникальных ширин: 0")
+       (mark:out "[TEST 11] Нумерация секций — ERROR")
+       (mark:out "Размеров шкалы: 0")
        (mark:note-error)))))
 
 ;;;--------------------- TEST 12 — специальные Visibility --------------
@@ -1184,33 +1205,101 @@
      2)
     (t 0)))
 
-(defun mark:compose (prefix letter hnum suffix)
+(defun mark:compose (prefix letter subl hnum subw suffix)
+  ;; Ред. 48.0: БУКВА [. литера подъяруса] НОМЕР [. подындекс ширины] суффикс
   (strcat
     (if (and prefix (/= prefix "") letter)
       (strcat prefix " ")
       "")
     (if letter letter "")
+    (if (and subl (/= subl "")) (strcat "." subl) "")
     (if hnum (itoa hnum) "")
+    (if (and subw (numberp subw) (> subw 0))
+      (strcat "." (itoa subw))
+      "")
     (if suffix suffix "")))
 
-(defun mark:build-marks (/ out r w h iw ih letter hnum suffix m)
-  (setq out nil)
+(defun mark:build-marks (/ out r w h geo secw tierh iw ih letter hnum suffix m
+                            subw subl subh mapW mapH lst pos v)
+  ;; Ред. 48.0: марка от секции и яруса. Подындексы — глобально по
+  ;; номеру секции (.1/.2/.3 по возрастанию ширины) и букве яруса
+  ;; (.а/.б/.в по возрастанию высоты). Без гео — марка не формируется.
+  (setq mapW nil
+        mapH nil
+        out  nil)
   (foreach r *mark:records*
-    (setq w      (mark:rec-get r 'width)
-          h      (mark:rec-get r 'height)
-          iw     (if w (mark:index-of *mark:widths* w) nil)
-          ih     (if h (mark:index-of *mark:heights* h) nil)
-          ;; буква — вертикальная рядовка (высота), номер — горизонтальная (ширина)
-          letter (if ih (mark:letter-at ih) nil)
-          hnum   (if iw (1+ iw) nil)
-          suffix (mark:get-special-suffix (mark:rec-get r 'vis))
-          m      (if (and letter hnum)
-                   (mark:compose *mark:prefix* letter hnum suffix)
-                   nil))
-    (setq r (mark:rec-put r 'letter   letter))
-    (setq r (mark:rec-put r 'hnum     hnum))
-    (setq r (mark:rec-put r 'mark-new m))
-    (setq out (cons r out)))
+    (setq geo (cdr (assoc (mark:rec-get r 'ename) *mark:fill-geo*)))
+    (if (and geo (numberp (nth 0 geo)) (numberp (nth 1 geo)))
+      (progn
+        (setq r (mark:rec-put r 'secw (nth 0 geo))
+              r (mark:rec-put r 'tierh (nth 1 geo))
+              iw (mark:index-of *mark:widths* (nth 0 geo))
+              ih (mark:index-of *mark:heights* (nth 1 geo))
+              r (mark:rec-put r 'hidx ih)
+              w  (mark:rec-get r 'width)
+              h  (mark:rec-get r 'height))
+        (if (and iw (not (mark:same-num? w (nth 0 geo))))
+          (setq mapW (mark:map-add mapW iw w)))
+        (if (and ih (not (mark:same-num? h (nth 1 geo))))
+          (setq mapH (mark:map-add mapH ih h))))
+      (setq r (mark:rec-put r 'secw nil)
+            r (mark:rec-put r 'tierh nil)
+            r (mark:rec-put r 'hidx nil))))
+  (setq mapW (mark:map-sort mapW)
+        mapH (mark:map-sort mapH))
+  (foreach r *mark:records*
+    (setq secw (mark:rec-get r 'secw)
+          tierh (mark:rec-get r 'tierh))
+    (if (and (numberp secw) (numberp tierh))
+      (progn
+        (setq iw     (mark:index-of *mark:widths* secw)
+              ih     (mark:index-of *mark:heights* tierh)
+              letter (if ih (mark:letter-at ih) nil)
+              hnum   (if iw (1+ iw) nil)
+              w      (mark:rec-get r 'width)
+              h      (mark:rec-get r 'height)
+              subw   nil
+              subl   nil
+              subh   nil)
+        (if (and iw (not (mark:same-num? w secw)))
+          (progn
+            (setq lst (cdr (assoc iw mapW))
+                  pos 0)
+            (foreach v lst
+              (setq pos (1+ pos))
+              (if (and (null subw) (mark:same-num? v w))
+                (setq subw pos)))))
+        (if (and ih (not (mark:same-num? h tierh)))
+          (progn
+            (setq lst (cdr (assoc ih mapH))
+                  pos 0)
+            (foreach v lst
+              (setq pos (1+ pos))
+              (if (and (null subl) (mark:same-num? v h))
+                (setq subl (strcase (mark:letter-at (- pos 1)) t)
+                      subh pos)))))
+        (setq r (mark:rec-put r 'letter letter)
+              r (mark:rec-put r 'hnum hnum)
+              r (mark:rec-put r 'subw subw)
+              r (mark:rec-put r 'subl subl)
+              r (mark:rec-put r 'subh subh)))
+      (setq r (mark:rec-put r 'letter nil)
+            r (mark:rec-put r 'hnum nil)
+            r (mark:rec-put r 'subw nil)
+            r (mark:rec-put r 'subl nil)
+            r (mark:rec-put r 'subh nil)))
+    (setq suffix (mark:get-special-suffix (mark:rec-get r 'vis))
+          m      (if (and (mark:rec-get r 'letter)
+                          (numberp (mark:rec-get r 'hnum)))
+                   (mark:compose *mark:prefix*
+                                 (mark:rec-get r 'letter)
+                                 (mark:rec-get r 'subl)
+                                 (mark:rec-get r 'hnum)
+                                 (mark:rec-get r 'subw)
+                                 suffix)
+                   nil)
+          r      (mark:rec-put r 'mark-new m)
+          out    (cons r out)))
   (setq *mark:records* (reverse out))
   *mark:records*)
 
@@ -1225,13 +1314,20 @@
        (float x)
        0.0))))
 
-(defun mark:rec-key (r / w h vr ix)
-  (setq w  (mark:num-safe (mark:rec-get r 'width))
-        h  (mark:num-safe (mark:rec-get r 'height))
+(defun mark:rec-key (r / w h vr ix sw sh pw pl)
+  ;; Ред. 48.0: секция -> подындекс -> ярус -> подъярус -> Visibility
+  (setq w  (mark:num-safe (mark:rec-get r 'secw))
+        h  (mark:num-safe (mark:rec-get r 'tierh))
+        sw (mark:rec-get r 'subw)
+        sh (mark:rec-get r 'subh)
+        pw (mark:num-safe (mark:rec-get r 'width))
+        pl (mark:num-safe (mark:rec-get r 'height))
         vr (mark:vis-rank (mark:rec-get r 'vis))
         ix (mark:rec-get r 'idx))
-  (list w
-        h
+  (list (if (> w 0.0) w pw)
+        (if (numberp sw) (float sw) 0.0)
+        (if (> h 0.0) h pl)
+        (if (numberp sh) (float sh) 0.0)
         (if (numberp vr) (float vr) 0.0)
         (if (numberp ix) (float ix) 0.0)))
 
@@ -1284,7 +1380,7 @@
                              letter hnum suffix
                              kinds kind)
   (mark:out "")
-  (mark:out "[DIAG] Одинаковый размер > один базис (буква+номер)")
+  (mark:out "[DIAG] Одинаковый размер > один базис (буква+литера+номер+подындекс)")
   (setq groups nil)
   (foreach r *mark:records*
     (setq w (mark:rec-get r 'width)
@@ -1317,7 +1413,13 @@
             hnum   (mark:rec-get r 'hnum)
             suffix (mark:get-special-suffix (mark:rec-get r 'vis))
             base   (list (if letter letter "?")
-                         (if hnum (itoa hnum) "?")))
+                         (if (mark:rec-get r 'subl)
+                           (strcat "." (mark:rec-get r 'subl))
+                           "")
+                         (if hnum (itoa hnum) "?")
+                         (if (mark:rec-get r 'subw)
+                           (strcat "." (itoa (mark:rec-get r 'subw)))
+                           "")))
       (if (not (member base bases))
         (setq bases (cons base bases)))
       (setq kind (if (= suffix "") "обычное" suffix))
@@ -1850,9 +1952,11 @@
     (mark:pad-line "Витраж:"
                    (if *mark:prefix-found* *mark:prefix* "—")))
   (mark:out
-    (mark:pad-line "Уникальных ширин:" (itoa (length *mark:widths*))))
+    (mark:pad-line "Шкала секций (номера):"
+                   (itoa (length *mark:widths*))))
   (mark:out
-    (mark:pad-line "Уникальных высот:" (itoa (length *mark:heights*))))
+    (mark:pad-line "Шкала ярусов (буквы):"
+                   (itoa (length *mark:heights*))))
   (mark:out (mark:pad-line "Стемалит:" (itoa *mark:cnt-stem*)))
   (mark:out (mark:pad-line "Сэндвич:"  (itoa *mark:cnt-sand*)))
   (mark:out
@@ -1882,6 +1986,16 @@
     (princ)
 
     (progn
+      ;; Ред. 48.0: без раскладки данных о секциях нет — просим каркас.
+      (if (null *mark:fill-geo*)
+        (setq r (vl-catch-all-apply 'mark:sec-standalone nil)))
+      (if (and (null *mark:fill-geo*) *mark:fills*)
+        (progn
+          (mark:out
+            "[ERROR] Нет данных о секциях: запустите МАРКАЗАПБЛОК")
+          (mark:out
+            "        или укажите каркас по запросу программы.")
+          (mark:note-error)))
       ;; A1. чтение данных (read-only)
       (setq r (vl-catch-all-apply 'mark:collect-data nil))
       (if (vl-catch-all-error-p r)
@@ -1912,6 +2026,10 @@
            (mark:out "[TEST 13] Проверка формирования марок — SKIPPED")
            (mark:out
              "[INFO] Есть критические ошибки диагностики — марки не формируются."))))
+
+      ;; A3a. TEST 16 — секции и ярусы (Ред. 48.0)
+      (if (and (= *mark:errors* 0) *mark:fill-geo* *mark:records*)
+        (mark:safe 'mark:test-16 "TEST 16"))
 
       ;; A3b. диагностика стм/снд vs обычное
       (if (and (= *mark:errors* 0) *mark:records*)
@@ -2059,8 +2177,8 @@
     ((> (cadr a) (cadr b)) nil)
     ((< (caddr a) (caddr b)) t)
     ((> (caddr a) (caddr b)) nil)
-    ((< ma mb) t)
-    ((> ma mb) nil)
+    ((mark:nat-less ma mb) t)
+    ((mark:nat-less mb ma) nil)
     (t nil)))
 
 ;; Агрегация (type h w mark) -> (type h w mark count)
@@ -2159,6 +2277,8 @@
               nil)
             (progn
               ;; ширины колонок: № | Тип | Марка | H | W | Кол-во | Площадь
+              ;; Ред. 48.0: таблица ведомости — на слой «Размеры»
+              (mark:tbl-layer doc tbl)
               (vl-catch-all-apply 'vla-SetColumnWidth (list tbl 0 14.0))
               (vl-catch-all-apply 'vla-SetColumnWidth (list tbl 1 45.0))
               (vl-catch-all-apply 'vla-SetColumnWidth (list tbl 2 40.0))
@@ -2652,6 +2772,8 @@
                   (mtab:export-csv data (strcat base ".csv"))))))
           (if do-table
             (mtab:create-table data))
+          ;; Ред. 48.0: файл сверки шкал (SYNC_MARKZV.md, §7)
+          (mark:scale-write-file)
           (mark:out "[INFO] Готово.")))))
   (princ))
 
@@ -2791,7 +2913,8 @@
            (cons (list (if pa (car pa) "")
                        (if pa (cadr pa) "")
                        e cx cy x0 x1 y0 y1
-                       (float w) (float h))
+                       (float w) (float h)
+                       (if mval mval ""))
                  out))))))
   (setq out (reverse out))
   ;; 2) один знаменатель: индекс ТОЛЬКО от W/H — как МАРКАРОВКАЗАП
@@ -2799,7 +2922,11 @@
 
 ;; Переназначение: буква = индекс высоты, номер = индекс ширины + 1
 ;; rec = (letter num e cx cy x0 x1 y0 y1 w h)
-(defun mark:ar-reindex (recs / ws hs ws1 hs1 r w h iw ih letter num out)
+;; Ред. 48.0: буква/номер — из Марки (подындексы сохраняются);
+;; запас — индекс от W/H, как в Ред. 47.8.
+;; rec = (letter num e cx cy x0 x1 y0 y1 w h mark)
+(defun mark:ar-reindex (recs / ws hs ws1 hs1 r w h iw ih letter num out m pa
+                              nums letters)
   (setq ws1 nil
         hs1 nil)
   (foreach r recs
@@ -2811,32 +2938,48 @@
       (setq hs1 (cons h hs1))))
   (setq ws (mark:sort-unique (mark:positives ws1))
         hs (mark:sort-unique (mark:positives hs1))
-        *mark:widths*  ws
-        *mark:heights* hs
         out nil)
   (foreach r recs
-    (setq w     (nth 9 r)
-          h     (nth 10 r)
-          iw    (mark:index-of ws w)
-          ih    (mark:index-of hs h)
-          letter (nth 0 r)
-          num    (nth 1 r))
-    ;; не оставлять букву/номер из старой Марки: индекс только от размера
-    (setq letter ""
-          num    "")
-    (if ih
-      (setq letter (mark:letter-at ih)))
-    (if (mark:strp letter)
-      (setq letter (strcase letter)))
-    (if iw
-      (setq num (itoa (1+ iw))))
-    (setq out
-      (cons (list letter num
-                  (nth 2 r) (nth 3 r) (nth 4 r)
-                  (nth 5 r) (nth 6 r) (nth 7 r) (nth 8 r)
-                  w h)
-            out)))
-  (reverse out))
+    (setq m  (nth 11 r)
+          pa (if (mark:strp m) (mark:ar-parse2 m) nil))
+    (cond
+      (pa
+        (setq letter (nth 0 pa)
+              num    (nth 1 pa)))
+      (t
+        ;; запас: индекс от размера (как в Ред. 47.8)
+        (setq w      (nth 9 r)
+              h      (nth 10 r)
+              iw     (mark:index-of ws w)
+              ih     (mark:index-of hs h)
+              letter ""
+              num    "")
+        (if ih
+          (setq letter (mark:letter-at ih)))
+        (if (mark:strp letter)
+          (setq letter (strcase letter)))
+        (if iw
+          (setq num (itoa (1+ iw))))))
+    (setq out (cons (list letter
+                          num
+                          (nth 2 r) (nth 3 r) (nth 4 r)
+                          (nth 5 r) (nth 6 r) (nth 7 r) (nth 8 r)
+                          (nth 9 r) (nth 10 r) (nth 11 r))
+                    out)))
+  (setq out (reverse out))
+  ;; INFO-шкалы: уникальные обозначения
+  (setq nums nil
+        letters nil)
+  (foreach r out
+    (if (and (mark:strp (nth 1 r)) (/= (nth 1 r) "")
+             (not (member (nth 1 r) nums)))
+      (setq nums (cons (nth 1 r) nums)))
+    (if (and (mark:strp (nth 0 r)) (/= (nth 0 r) "")
+             (not (member (nth 0 r) letters)))
+      (setq letters (cons (nth 0 r) letters))))
+  (setq *mark:widths*  (reverse nums)
+        *mark:heights* (reverse letters))
+  out)
 
 ;;;--- Кластеризация ----------------------------------------------------
 
@@ -3252,9 +3395,9 @@
                  (strcat "[INFO] Пригодных заполнений: "
                          (itoa (length recs))))
                (mark:out
-                 (strcat "[INFO] Индексы рядовки: номер=ширина ("
+                 (strcat "[INFO] Индексы рядовки: номер=секция ("
                          (itoa (length *mark:widths*))
-                         "), буква=высота ("
+                         "), буква=ярус ("
                          (itoa (length *mark:heights*))
                          ")."))
 
@@ -3357,7 +3500,7 @@
                        ;; не от первого в строке
                        (setq ref    (car s0)
                              letter (if (mark:strp (nth 0 ref))
-                                      (strcase (nth 0 ref))
+                                      (nth 0 ref)
                                       ""))
                        (setq v-items
                          (cons (list (nth 4 ref) (nth 10 ref) letter)
@@ -3996,9 +4139,11 @@
 
 (defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks
                                        seen n-open axes vs hs items boxes
-                                       polys n-poly bb)
+                                       polys n-poly bb msegs rblocks n-hidden
+                                       vs2 out)
   (mark:out "5-Сетка-все-типы: блоки, мультилинии, линии, полилинии, дуги.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
+  (setq *mark:fill-geo* nil)
   (setq ss (mark:fill-all-ss))
   (if (null ss)
     (list cells pts 'cancel)
@@ -4006,19 +4151,25 @@
       (mark:fill-type-stat ss)
       ;; Разбор выбора: блоки -> каркас-вставки, остальное -> отрезки.
       ;; Проёмы (окно/дверь) — не каркас: линии рамы заходят в световой
-      ;; проём и занижают ячейку (Ред. 47.6).
-      (setq segs   nil
-            blocks nil
-            seen   nil
-            polys  nil
-            n-open 0
-            i      (sslength ss))
+      ;; проём и занижают ячейку (Ред. 47.6). Скрытые слои — тоже не
+      ;; каркас (Ред. 48.0): выключенный или замороженный слой пропускаем.
+      (setq segs    nil
+            blocks  nil
+            seen    nil
+            polys   nil
+            msegs   nil
+            rblocks nil
+            n-hidden 0
+            n-open  0
+            i       (sslength ss))
       (while (> i 0)
         (setq i   (1- i)
               e   (ssname ss i)
               ed  (entget e)
               typ (if ed (cdr (assoc 0 ed)) nil))
         (cond
+          ((or (null ed) (not (mark:ent-visible? e)))
+           (setq n-hidden (1+ n-hidden)))
           ((= typ "INSERT")
            (setq nm (mark:fill-eff-name e))
            (cond
@@ -4028,7 +4179,11 @@
              ((mark:fill-block-seen? seen nm e) nil)
              (t
               (setq blocks (cons (list 0.0 e) blocks)
-                    seen   (cons (cons nm (cdr (assoc 10 ed))) seen)))))
+                    seen   (cons (cons nm (cdr (assoc 10 ed))) seen))
+              ;; блоки-ригели: длины для шкалы «в свету» (зеркало MarkZV)
+              (if (and (mark:strp nm)
+                       (wcmatch (strcase nm) "*РИГЕЛЬ*"))
+                (setq rblocks (cons e rblocks))))))
           ;; Замкнутая полилиния — контур ячейки: габарит без отступа
           ;; (семантика 7-Полилиния), в оси не идёт.
           ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
@@ -4037,13 +4192,20 @@
           ((member typ '("LINE" "ARC" "MLINE"))
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
-             (setq segs (append r segs))))
+             (setq segs (append r segs)))
+           ;; шкала: только MLINE (зеркало MarkZV, *mk:seg-types*)
+           (if (and (= typ "MLINE") r (not (vl-catch-all-error-p r)))
+             (setq msegs (append r msegs))))
           ;; Незамкнутая полилиния и старый POLYLINE — рамка из линий:
           ;; отрезки с полушириной 0, отступ 25 не нужен.
           ((member typ '("LWPOLYLINE" "POLYLINE"))
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
              (setq segs (append (mark:fill-lines-hw0 r) segs))))))
+      (if (> n-hidden 0)
+        (mark:out
+          (strcat "[INFO] Пропущено на скрытых слоях: " (itoa n-hidden)
+                  " — не каркас.")))
       (if (> n-open 0)
         (mark:out
           (strcat "[INFO] Блоков проёма в выборе пропущено: " (itoa n-open)
@@ -4051,7 +4213,9 @@
       (mark:out
         (strcat "[INFO] Каркас: блоков " (itoa (length blocks))
                 ", отрезков " (itoa (length segs))))
-      (setq boxes nil)
+      (setq boxes nil
+            vs    nil
+            hs    nil)
       (cond
         ;; Только линии — дословно конвейер 1-Сетка-мультилинии:
         ;; оси, Т-объединение, проверка замкнутости grid-valid.
@@ -4068,14 +4232,13 @@
              (if (null (car r))
                (mark:out "[INFO] Мало осей — увеличьте *mark:fill-tol*."))
              (setq boxes (car r)))))
-        ;; Только блоки — дословно конвейер 3-Сетка-динамика.
-        ((null segs)
-         (mark:out "[INFO] Блочный каркас — расчёт как в 3-Сетка-динамика.")
-         (setq boxes (mark:fill-closed-cells blocks)))
-        ;; Смешанный каркас: оси блоков и линий в одном списке — ячейка
-        ;; может быть собрана из блоков и линий (Ред. 47.7).
+        ;; Блочный и смешанный каркас: единый расчёт осей — ячейка может
+        ;; быть собрана из блоков и линий (Ред. 47.7); оси нужны и для
+        ;; секций/ярусов (Ред. 48.0).
         (t
-         (mark:out "[INFO] Смешанный каркас: блоки и линии, единый расчёт осей.")
+         (if segs
+           (mark:out "[INFO] Смешанный каркас: блоки и линии, единый расчёт осей.")
+           (mark:out "[INFO] Блочный каркас — расчёт как в 3-Сетка-динамика."))
          (setq axes  (mark:fill-owned-axes blocks)
                vs    (car axes)
                hs    (cadr axes)
@@ -4086,6 +4249,15 @@
            (strcat "[INFO] Осей: вертикальных " (itoa (length vs))
                    ", горизонтальных " (itoa (length hs)) "."))
          (setq boxes (mark:fill-items->cells vs hs))))
+      ;; Секции/ярусы (Ред. 48.0): гео ячейки = (ширина секции,
+      ;; высота яруса). Границы секции — соседние неимпостные колонки,
+      ;; ярус — горизонтали, охватывающие секцию. Линейный каркас
+      ;; (Т-объединение) — собственная секция, как раньше.
+      (setq vs2 (if (and vs hs) (mark:sec-columns vs hs) nil))
+      (setq out nil)
+      (foreach bb boxes
+        (setq out (cons (append bb (mark:sec-geo-one bb vs2 hs)) out)))
+      (setq boxes (reverse out))
       ;; Полилинии-контуры: ячейка = габарит замкнутой полилинии, без
       ;; отступа. Крупнее лимита — не ячейка, а контур участка.
       (setq n-poly 0)
@@ -4095,13 +4267,18 @@
                 (and (numberp *mark:fill-max-h*)
                      (> (- (nth 3 bb) (nth 1 bb)) *mark:fill-max-h*)))
           (setq n-poly (1+ n-poly))
-          (setq boxes (cons bb boxes))))
+          (setq boxes (cons (append bb
+                                    (list (- (nth 2 bb) (nth 0 bb))
+                                          (- (nth 3 bb) (nth 1 bb))))
+                            boxes))))
       (if polys
         (mark:out
           (strcat "[INFO] Полилиний-контуров: " (itoa (length polys))
                   (if (> n-poly 0)
                     (strcat ", крупнее лимита пропущено: " (itoa n-poly))
                     ""))))
+      ;; Шкала Блок 1: длины ригелей в свету — зеркало MarkZV Ред. 3.7.
+      (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
       ;; Фильтр проёмов: зона сетки, лог, пропуск ячеек с окнами/дверями.
       (foreach bb (mark:fill-filter-opening-cells boxes)
         (setq r (mark:fill-add cells pts bb)
@@ -5763,9 +5940,23 @@
               nil)
              ((not (and (mark:fill-covers (mark:fill-item-spans Lcol) yB yT gap)
                         (mark:fill-covers (mark:fill-item-spans Rcol) yB yT gap)))
-              (setq n-open (1+ n-open)))
+              (setq n-open (1+ n-open))
+              (if (<= n-open 8)
+                (mark:out
+                  (strcat "  неполный контур: "
+                          (mark:rjust (rtos xL 2 1) 12)
+                          "," (mark:rjust (rtos yB 2 1) 12)
+                          "  W=" (mark:rjust (rtos w 2 0) 5)
+                          "  H=" (mark:rjust (rtos h 2 0) 5)))))
              ((mark:fill-v-split cols iL iR yB yT gap)
-              (setq n-open (1+ n-open)))
+              (setq n-open (1+ n-open))
+              (if (<= n-open 8)
+                (mark:out
+                  (strcat "  неполный контур: "
+                          (mark:rjust (rtos xL 2 1) 12)
+                          "," (mark:rjust (rtos yB 2 1) 12)
+                          "  W=" (mark:rjust (rtos w 2 0) 5)
+                          "  H=" (mark:rjust (rtos h 2 0) 5)))))
              ((not (and (mark:fill-owners-differ
                           (mark:fill-overlap-owners Lcol yB yT gap)
                           (mark:fill-overlap-owners Rcol yB yT gap))
@@ -5904,7 +6095,8 @@
         (progn
           (setq t0 (getvar "MILLISECS"))
           (setq *mark:fill-undo-off* nil
-                *mark:fill-miss* nil)
+                *mark:fill-miss* nil
+                *mark:fill-geo* nil)
           (if (and doc (not *mark:batch-undo*))
             (mark:ax-invoke-ok doc "StartUndoMark" nil))
           (foreach cell cells
@@ -5924,7 +6116,13 @@
                       ins (vl-catch-all-apply
                             'vlax-vla-object->ename (list obj)))
                 (if (and (not (vl-catch-all-error-p ins)) ins)
-                  (setq lst (cons ins lst)))
+                  (progn
+                    (setq lst (cons ins lst))
+                    ;; Ред. 48.0: гео ячейки для маркировки
+                    (if (and (nth 4 cell) (nth 5 cell))
+                      (setq *mark:fill-geo*
+                        (cons (cons ins (list (nth 4 cell) (nth 5 cell)))
+                              *mark:fill-geo*)))))
                 (mark:out
                   (strcat "  ячейка " (mark:rjust (itoa n) 3)
                           ": " (mark:rjust (rtos x0 2 4) 12) "," (mark:rjust (rtos y0 2 4) 12)
@@ -6678,6 +6876,683 @@
   (setq *mark:reuse-sel*  nil
         *mark:batch-undo* nil)
   (princ))
+;;;=====================================================================
+;;;  РЕД. 48.0: СЕКЦИИ, ЯРУСЫ, ПОДЫНДЕКСЫ, ШКАЛА «В СВЕТУ»
+;;;  Синхронизация с MarkZV (SYNC_MARKZV.md): цифра марки = цифра
+;;;  ригеля той же длины в свету; подындекс ширины .1/.2/.3;
+;;;  подындекс высоты — точка + строчная литера (.а/.б); стм/снд.
+;;;=====================================================================
+
+;; Слой выключен или заморожен — объект скрыт, не каркас
+(defun mark:ent-hidden? (e / ed nm d c f)
+  (setq ed (if e (entget e) nil)
+        nm (if ed (cdr (assoc 8 ed)) nil))
+  (cond
+    ((and nm (setq d (tblsearch "LAYER" nm)))
+     (setq c (cdr (assoc 62 d))
+           f (cdr (assoc 70 d)))
+     (or (and (numberp c) (minusp c))
+         (and (numberp f) (= 1 (logand 1 f)))))
+    (t nil)))
+
+;; Видим ли объект: DXF 60, VLA Visible и слой
+(defun mark:ent-visible? (e)
+  (and (mark:fill-shown? e)
+       (not (mark:ent-hidden? e))))
+
+;; Конец вертикального элемента попадает в середину горизонтального:
+;; допуск по оси 30 мм, строго внутри пролёта (зеркало mk:beam-hit)
+(defun mark:sec-end-hit (x y hs / hit h)
+  (setq hit nil)
+  (foreach h hs
+    (if (and (null hit)
+             (<= (abs (- y (nth 0 h))) 30.0)
+             (> x (+ (nth 1 h) 30.0))
+             (< x (- (nth 2 h) 30.0)))
+      (setq hit t)))
+  hit)
+
+;; Импост («т»): оба конца вертикального элемента упираются в середины
+;; горизонтальных (зеркало mk:split-tjoints MarkZV) — не граница секции.
+(defun mark:sec-impost? (v hs)
+  (and (mark:sec-end-hit (nth 0 v) (nth 1 v) hs)
+       (mark:sec-end-hit (nth 0 v) (nth 2 v) hs)))
+
+;; Колонки-границы секций: неимпостные вертикальные элементы
+(defun mark:sec-columns (vs hs / out v)
+  (setq out nil)
+  (foreach v vs
+    (if (not (mark:sec-impost? v hs))
+      (setq out (cons v out))))
+  (reverse out))
+
+;; Гео ячейки: (ширина секции высота яруса). Границы секции —
+;; соседние колонки-границы; ярус — горизонтали, охватывающие секцию.
+;; Без осей (полилинии, линейный каркас с Т-объединением) — свой размер.
+(defun mark:sec-geo-one (bb vs2 hs / x0 y0 x1 y1 cols c face xl xr cov
+                             yb yt h f)
+  (setq x0 (nth 0 bb)
+        y0 (nth 1 bb)
+        x1 (nth 2 bb)
+        y1 (nth 3 bb))
+  (if (or (null vs2) (null hs))
+    (list (- x1 x0) (- y1 y0))
+    (progn
+      (setq cols (mark:fill-cluster-items vs2)
+            xl    nil
+            xr    nil)
+      (foreach c cols
+        (setq face (mark:fill-inner-edge c 1.0))
+        (if (and face (<= face (+ x0 1.0))
+                 (or (null xl) (> face xl)))
+          (setq xl face)))
+      (foreach c cols
+        (setq face (mark:fill-inner-edge c -1.0))
+        (if (and face (>= face (- x1 1.0))
+                 (or (null xr) (< face xr)))
+          (setq xr face)))
+      (if (null xl) (setq xl x0))
+      (if (null xr) (setq xr x1))
+      (setq cov nil)
+      (foreach h hs
+        (if (and (<= (nth 1 h) (+ xl 30.0))
+                 (>= (nth 2 h) (- xr 30.0)))
+          (setq cov (cons h cov))))
+      (setq yb nil
+            yt nil)
+      (foreach h cov
+        (setq f (+ (nth 0 h) (nth 3 h)))
+        (if (and (<= f (+ y0 30.0))
+                 (or (null yb) (> f yb)))
+          (setq yb f)))
+      (foreach h cov
+        (setq f (- (nth 0 h) (nth 3 h)))
+        (if (and (>= f (- y1 30.0))
+                 (or (null yt) (< f yt)))
+          (setq yt f)))
+      (if (null yb) (setq yb y0))
+      (if (null yt) (setq yt y1))
+      (list (- xr xl) (- yt yb)))))
+
+;; Значение динамического свойства по маске имени
+(defun mark:dyn-by-mask (e mask / pairs p v out)
+  (setq pairs (mark:dyn-pairs e)
+        out   nil)
+  (foreach p pairs
+    (if (and (null out)
+             (mark:strp (car p))
+             (wcmatch (strcase (car p)) (strcase mask)))
+      (progn
+        (setq v (mark:unwrap (cdr p)))
+        (if (numberp v)
+          (setq out v)))))
+  out)
+
+;; Длина блока-ригеля: свойство «*лин*», иначе габарит (зеркало mk:dim-src)
+(defun mark:sec-block-len (e / v bb)
+  (setq v (mark:dyn-by-mask e "*лин*"))
+  (if (numberp v)
+    v
+    (progn
+      (setq bb (mark:fill-e-bb e))
+      (if bb
+        (- (nth 2 bb) (nth 0 bb))
+        nil))))
+
+;; Пролёт блока-ригеля: (y x0 x1) | nil
+(defun mark:sec-block-span (e / L p)
+  (setq L (mark:sec-block-len e)
+        p (cdr (assoc 10 (entget e))))
+  (if (and (numberp L) (> L 0.0) p)
+    (list (float (cadr p)) (float (car p)) (+ (float (car p)) L))
+    nil))
+
+;; Вставка записи (ось нач кон) по возрастанию оси, без lambda
+(defun mark:sec-ins-ax (sorted r / out done q)
+  (setq out  nil
+        done nil)
+  (foreach q sorted
+    (if (and (null done) (>= (nth 0 q) (nth 0 r)))
+      (setq out (cons r out)
+            done t))
+    (setq out (cons q out)))
+  (if (null done)
+    (setq out (cons r out)))
+  (reverse out))
+
+;; Вставка числа по возрастанию, без lambda
+(defun mark:sec-ins-num (sorted k / out done q)
+  (setq out  nil
+        done nil)
+  (foreach q sorted
+    (if (and (null done) (>= q k))
+      (setq out (cons k out)
+            done t))
+    (setq out (cons q out)))
+  (if (null done)
+    (setq out (cons k out)))
+  (reverse out))
+
+;; Ключ шкалы: целые мм (зеркало mk:size-key)
+(defun mark:sec-key (v)
+  (if (numberp v)
+    (fix (+ v 0.5))
+    nil))
+
+;; Сортировка + дедупликация целых ключей
+(defun mark:sec-keys-sort (keys / sorted out q)
+  (setq sorted nil)
+  (foreach q keys
+    (if (numberp q)
+      (setq sorted (mark:sec-ins-num sorted q))))
+  (setq out nil)
+  (foreach q sorted
+    (if (or (null out) (/= (car out) q))
+      (setq out (cons q out))))
+  (reverse out))
+
+;; Блок 1 шкалы: длины горизонтальных элементов в свету.
+;; Зеркало MarkZV Ред. 3.7: геометрия MLINE (порог 50 мм, склейка
+;; соосных 200 мм при перекрытии), блоки «*ригель*»; блоки в приоритете.
+(defun mark:sec-scale1 (msegs rblocks / hrecs s x0 x1 ax len sorted out cur
+                                 cax0 cmin cmax g hit sp bspans keys)
+  (setq hrecs nil)
+  (foreach s msegs
+    (setq x0  (min (float (nth 0 s)) (float (nth 2 s)))
+          x1  (max (float (nth 0 s)) (float (nth 2 s)))
+          ax  (/ (+ (float (nth 1 s)) (float (nth 3 s))) 2.0)
+          len (- x1 x0))
+    (if (> len 50.0)
+      (setq hrecs (cons (list ax x0 x1) hrecs))))
+  (setq sorted nil)
+  (foreach g hrecs
+    (setq sorted (mark:sec-ins-ax sorted g)))
+  (setq out  nil
+        cur  nil
+        cax0 nil
+        cmin nil
+        cmax nil)
+  (foreach g sorted
+    (if (and cur
+             (<= (- (nth 0 g) cax0) 200.0)
+             (> (min (nth 2 g) cmax) (max (nth 1 g) cmin)))
+      (setq cmin (min cmin (nth 1 g))
+            cmax (max cmax (nth 2 g)))
+      (progn
+        (if cur
+          (setq out (cons (list cax0 cmin cmax) out)))
+        (setq cur  t
+              cax0 (nth 0 g)
+              cmin (nth 1 g)
+              cmax (nth 2 g)))))
+  (if cur
+    (setq out (cons (list cax0 cmin cmax) out)))
+  (setq out (reverse out))
+  ;; пролёты блоков-ригелей
+  (setq bspans nil)
+  (foreach sp rblocks
+    (setq sp (mark:sec-block-span sp))
+    (if sp
+      (setq bspans (cons sp bspans))))
+  (setq keys nil)
+  (foreach sp bspans
+    (setq keys (cons (mark:sec-key (- (nth 2 sp) (nth 1 sp))) keys)))
+  ;; треки, не покрытые блоками
+  (foreach g out
+    (setq hit nil)
+    (foreach sp bspans
+      (if (and (null hit)
+               (<= (abs (- (nth 0 g) (nth 0 sp))) 200.0)
+               (> (min (nth 2 g) (nth 2 sp))
+                  (max (nth 1 g) (nth 1 sp))))
+        (setq hit t)))
+    (if (null hit)
+      (setq keys (cons (mark:sec-key (- (nth 2 g) (nth 1 g))) keys))))
+  (mark:sec-keys-sort keys))
+
+;; Строка шкалы по ключу
+(defun mark:sec-row-of (rows k / hit row)
+  (setq hit nil)
+  (foreach row rows
+    (if (and (null hit) (= (nth 0 row) k))
+      (setq hit row)))
+  hit)
+
+;; Вставка строки шкалы по возрастанию размера
+(defun mark:sec-ins-row (sorted r / out done q)
+  (setq out  nil
+        done nil)
+  (foreach q sorted
+    (if (and (null done) (>= (nth 0 q) (nth 0 r)))
+      (setq out (cons r out)
+            done t))
+    (setq out (cons q out)))
+  (if (null done)
+    (setq out (cons r out)))
+  (reverse out))
+
+;; Итоговая шкала: Блок 1 (ригели) + Блок 2 (секции без ригеля).
+;; Возвращает ((размер_мм источник) ...), источник Р/З/РЗ.
+(defun mark:sec-scale-full (/ secw out k row sorted)
+  (setq secw nil)
+  (foreach row *mark:fill-geo*
+    (if (and (cdr row) (numberp (cadr row)))
+      (setq secw (cons (mark:sec-key (cadr row)) secw))))
+  (setq out nil)
+  (foreach k *mark:scale1*
+    (if (null (mark:sec-row-of out k))
+      (setq out (cons (list k (if (member k secw) "РЗ" "Р")) out))))
+  (foreach k secw
+    (if (and (null (mark:sec-row-of out k))
+             (null (member k *mark:scale1*)))
+      (setq out (cons (list k "З") out))))
+  (setq sorted nil)
+  (foreach row out
+    (setq sorted (mark:sec-ins-row sorted row)))
+  sorted)
+
+;; Источник номера секции: РЗ/З/Р
+(defun mark:sec-src-of (n / row)
+  (setq row nil)
+  (if (and (numberp n)
+           *mark:scale-final*
+           (<= n (length *mark:scale-final*))
+           (> n 0))
+    (setq row (nth (1- n) *mark:scale-final*)))
+  (if row
+    (nth 1 row)
+    "?"))
+
+;; Карта подындексов: ((ключ . (размеры)) ...)
+(defun mark:map-add (map key val / hit)
+  (setq hit (assoc key map))
+  (if hit
+    (subst (cons key (cons val (cdr hit))) hit map)
+    (cons (cons key (list val)) map)))
+
+(defun mark:map-sort (map / out e)
+  (setq out nil)
+  (foreach e map
+    (setq out (cons (cons (car e)
+                          (mark:sort-unique (mark:positives (cdr e))))
+                    out)))
+  out)
+
+;; Списки ширин/высот записей (запасная шкала W/H)
+(defun mark:recs-widths (/ out r w)
+  (setq out nil)
+  (foreach r *mark:records*
+    (setq w (mark:rec-get r 'width))
+    (if (numberp w)
+      (setq out (cons w out))))
+  (reverse out))
+
+(defun mark:recs-heights (/ out r h)
+  (setq out nil)
+  (foreach r *mark:records*
+    (setq h (mark:rec-get r 'height))
+    (if (numberp h)
+      (setq out (cons h out))))
+  (reverse out))
+
+;; Готовые заполнения без раскладки: попросить каркас и рассчитать
+;; секции/ярусы на месте (решение заказчика 2026-09-29).
+(defun mark:sec-standalone (/ ss i e ed typ nm r segs blocks msegs rblocks
+                               seen polys axes vs hs items boxes bb n-poly
+                               vs2 out ins hit cnt)
+  (mark:out "Для расчёта секций выберите каркас рамкой. Enter — отмена.")
+  (setq ss (vl-catch-all-apply 'ssget nil))
+  (if (or (vl-catch-all-error-p ss) (null ss))
+    (progn
+      (mark:out "[INFO] Каркас не выбран.")
+      nil)
+    (progn
+      (setq segs    nil
+            blocks  nil
+            msegs   nil
+            rblocks nil
+            seen    nil
+            polys   nil
+            i       (sslength ss))
+      (while (> i 0)
+        (setq i   (1- i)
+              e   (ssname ss i)
+              ed  (entget e)
+              typ (if ed (cdr (assoc 0 ed)) nil))
+        (cond
+          ((or (null ed) (not (mark:ent-visible? e))) nil)
+          ((= typ "INSERT")
+           (setq nm (mark:fill-eff-name e))
+           (cond
+             ((mark:fill-skip-block? nm) nil)
+             ((mark:fill-opening-block? nm) nil)
+             ((mark:fill-block-seen? seen nm e) nil)
+             (t
+              (setq blocks (cons (list 0.0 e) blocks)
+                    seen   (cons (cons nm (cdr (assoc 10 ed))) seen))
+              (if (and (mark:strp nm)
+                       (wcmatch (strcase nm) "*РИГЕЛЬ*"))
+                (setq rblocks (cons e rblocks))))))
+          ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
+           (setq bb (mark:cell-bb e))
+           (if bb (setq polys (cons bb polys))))
+          ((member typ '("LINE" "ARC" "MLINE"))
+           (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+           (if (and r (not (vl-catch-all-error-p r)))
+             (progn
+               (setq segs (append r segs))
+               (if (= typ "MLINE")
+                 (setq msegs (append r msegs))))))
+          ((member typ '("LWPOLYLINE" "POLYLINE"))
+           (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
+           (if (and r (not (vl-catch-all-error-p r)))
+             (setq segs (append (mark:fill-lines-hw0 r) segs))))))
+      (setq boxes nil
+            vs    nil
+            hs    nil)
+      (cond
+        ((null blocks)
+         (if segs
+           (setq boxes (car (mark:fill-segs->cells segs)))))
+        (t
+         (setq axes  (mark:fill-owned-axes blocks)
+               vs    (car axes)
+               hs    (cadr axes)
+               items (mark:fill-seg-items segs)
+               vs    (append vs (car items))
+               hs    (append hs (cadr items))
+               boxes (mark:fill-items->cells vs hs))))
+      (setq n-poly 0)
+      (foreach bb polys
+        (if (or (and (numberp *mark:fill-max-w*)
+                     (> (- (nth 2 bb) (nth 0 bb)) *mark:fill-max-w*))
+                (and (numberp *mark:fill-max-h*)
+                     (> (- (nth 3 bb) (nth 1 bb)) *mark:fill-max-h*)))
+          (setq n-poly (1+ n-poly))
+          (setq boxes (cons (append bb
+                                    (list (- (nth 2 bb) (nth 0 bb))
+                                          (- (nth 3 bb) (nth 1 bb))))
+                            boxes))))
+      (setq vs2 (if (and vs hs) (mark:sec-columns vs hs) nil))
+      (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
+      ;; сопоставление: точка вставки блока = угол ячейки
+      (setq out nil
+            cnt 0)
+      (foreach e *mark:fills*
+        (setq ins (cdr (assoc 10 (entget e)))
+              hit nil)
+        (if ins
+          (progn
+            (foreach bb boxes
+              (if (and (null hit)
+                       (<= (abs (- (float (nth 0 bb)) (float (car ins)))) 2.0)
+                       (<= (abs (- (float (nth 1 bb)) (float (cadr ins)))) 2.0))
+                (setq hit (mark:sec-geo-one bb vs2 hs))))))
+        (if hit
+          (setq out (cons (cons e hit) out))
+          (setq cnt (1+ cnt))))
+      (if (> cnt 0)
+        (progn
+          (mark:out
+            (strcat "[ERROR] Вне ячеек каркаса: " (itoa cnt)
+                    " заполнени(й) — марки не сформированы."))
+          (mark:note-error)))
+      (setq *mark:fill-geo* (reverse out))
+      (mark:out
+        (strcat "[INFO] Каркас: ячеек " (itoa (length boxes))
+                ", заполнений с гео: " (itoa (length out)) "."))
+      *mark:fill-geo*)))
+
+;; Сортировка строк-групп по номеру
+(defun mark:sec-sort-rows (rows / sorted out r q done)
+  (setq sorted nil)
+  (foreach r rows
+    (setq out  nil
+          done nil)
+    (foreach q sorted
+      (if (and (null done) (>= (nth 0 q) (nth 0 r)))
+        (setq out (cons r out)
+              done t))
+      (setq out (cons q out)))
+    (if (null done)
+      (setq out (cons r out)))
+    (setq sorted (reverse out)))
+  sorted)
+
+(defun mark:sec-join (lst / out s)
+  (setq out "")
+  (foreach s lst
+    (if (= out "")
+      (setq out s)
+      (setq out (strcat out ", " s))))
+  out)
+
+;; TEST 16: таблицы секций и ярусов (ТЗ 3.0, §7.1)
+(defun mark:test-16 (/ rows lines r n row q size src subs cnt div k sw-cnt
+                        lrows llines letter lsize lsubs lhidx sh-cnt ln)
+  (mark:out "")
+  (mark:out "[TEST 16] Секции и ярусы")
+  (setq rows nil)
+  (foreach r *mark:records*
+    (setq n (mark:rec-get r 'hnum))
+    (if (numberp n)
+      (progn
+        (setq row nil)
+        (foreach q rows
+          (if (and (null row) (= (nth 0 q) n))
+            (setq row q)))
+        (if row
+          (setq rows (subst (list n (cons r (nth 1 row))) row rows))
+          (setq rows (cons (list n (list r)) rows))))))
+  (setq rows (mark:sec-sort-rows rows))
+  (setq div    0
+        sw-cnt 0
+        lines  nil)
+  (foreach row rows
+    (setq n    (nth 0 row)
+          r    (car (nth 1 row))
+          size (mark:rec-get r 'secw)
+          src  (mark:sec-src-of n)
+          subs nil
+          cnt  0)
+    (foreach q (nth 1 row)
+      (setq cnt (1+ cnt))
+      (if (numberp (mark:rec-get q 'subw))
+        (progn
+          (setq sw-cnt (1+ sw-cnt))
+          (setq k (strcat (mark:fmt-raw (mark:rec-get q 'width))
+                          " (." (itoa (mark:rec-get q 'subw)) ")"))
+          (if (not (member k subs))
+            (setq subs (cons k subs))))))
+    (if subs
+      (setq div (1+ div)))
+    (setq lines
+      (cons (strcat "  " (mark:rjust (itoa n) 3)
+                    "  " (mark:rjust (mark:fmt-raw size) 6)
+                    "  " src
+                    "  "
+                    (if subs
+                      (mark:sec-join (reverse subs))
+                      "—")
+                    "  заполнений: " (itoa cnt))
+            lines)))
+  (mark:out
+    (strcat "  Секций: " (itoa (length rows))
+            ", из них разделённых: " (itoa div)))
+  (if rows
+    (progn
+      (mark:out "  №   W      источник  подъячейки")
+      (foreach ln (reverse lines)
+        (mark:out ln))))
+  ;; ярусы: группировка по букве
+  (setq lrows nil)
+  (foreach r *mark:records*
+    (setq lhidx (mark:rec-get r 'hidx))
+    (if (numberp lhidx)
+      (progn
+        (setq row nil)
+        (foreach q lrows
+          (if (and (null row) (= (nth 0 q) lhidx))
+            (setq row q)))
+        (if row
+          (setq lrows (subst (list lhidx (cons r (nth 1 row))) row lrows))
+          (setq lrows (cons (list lhidx (list r)) lrows))))))
+  (setq lrows  (mark:sec-sort-rows lrows)
+        llines nil
+        sh-cnt 0)
+  (foreach row lrows
+    (setq r      (car (nth 1 row))
+          letter (if (mark:rec-get r 'letter) (mark:rec-get r 'letter) "?")
+          lsize  (mark:rec-get r 'tierh)
+          lsubs  nil
+          cnt    0)
+    (foreach q (nth 1 row)
+      (setq cnt (1+ cnt))
+      (if (mark:rec-get q 'subl)
+        (progn
+          (setq sh-cnt (1+ sh-cnt))
+          (setq k (strcat (mark:fmt-raw (mark:rec-get q 'height))
+                          " (" (mark:rec-get q 'subl) ")"))
+          (if (not (member k lsubs))
+            (setq lsubs (cons k lsubs))))))
+    (setq llines
+      (cons (strcat "  " (mark:rjust letter 4)
+                    "  " (mark:rjust (mark:fmt-raw lsize) 6)
+                    "  "
+                    (if lsubs
+                      (mark:sec-join (reverse lsubs))
+                      "—")
+                    "  заполнений: " (itoa cnt))
+            llines)))
+  (if lrows
+    (progn
+      (mark:out
+        (strcat "  Ярусов: " (itoa (length lrows))))
+      (foreach ln (reverse llines)
+        (mark:out ln))))
+  (mark:out
+    (strcat "  [INFO] Подъячеек по ширине: " (itoa sw-cnt)
+            ", по высоте: " (itoa sh-cnt))))
+
+;; Разбор марки с подындексами: "Б.а12.1" > ("Б.а" "12.1")
+(defun mark:ar-parse2 (m / tail i n letter num)
+  (setq tail (mark:ar-strip-suffix (mark:trim m)))
+  (if (or (null tail) (= tail ""))
+    nil
+    (progn
+      (setq i     1
+            n     (strlen tail)
+            letter ""
+            num    "")
+      (while (and (<= i n)
+                  (mark:ar-letter? (substr tail i 1))
+                  (not (member (strcase (substr tail i 1)) '("Й" "З"))))
+        (setq letter (strcat letter (strcase (substr tail i 1)))
+              i     (1+ i)))
+      (if (and (<= (+ i 1) n)
+               (= (substr tail i 1) ".")
+               (mark:ar-letter? (substr tail (+ i 1) 1)))
+        (progn
+          (setq letter (strcat letter "."
+                               (strcase (substr tail (+ i 1) 1) t))
+                i     (+ i 2))))
+      (while (and (<= i n) (mark:ar-digit? (substr tail i 1)))
+        (setq num (strcat num (substr tail i 1))
+              i   (1+ i)))
+      (if (and (<= (+ i 1) n)
+               (= (substr tail i 1) ".")
+               (mark:ar-digit? (substr tail (+ i 1) 1)))
+        (progn
+          (setq i (+ i 1))
+          (while (and (<= i n) (mark:ar-digit? (substr tail i 1)))
+            (setq num (strcat num (substr tail i 1))
+                  i   (1+ i)))))
+      (if (and (/= letter "") (/= num ""))
+        (list letter num)
+        nil))))
+
+;; Натуральный ключ обозначения: цифровые группы как числа
+(defun mark:nat-key (s / out i n c dig)
+  (setq out nil
+        i   1
+        n   (strlen s))
+  (while (<= i n)
+    (setq c (substr s i 1))
+    (if (mark:ar-digit? c)
+      (progn
+        (setq dig "")
+        (while (and (<= i n) (mark:ar-digit? (substr s i 1)))
+          (setq dig (strcat dig (substr s i 1))
+                i   (1+ i)))
+        (setq out (cons (cons 1 (atof dig)) out)))
+      (progn
+        (setq out (cons (cons 0 c) out)
+              i   (1+ i)))))
+  (reverse out))
+
+;; Сравнение натуральных ключей: 9 < 10 < 12.1 < 13
+(defun mark:nat-key< (a b / i av bv res)
+  (setq i   0
+        res nil)
+  (while (and (null res)
+              (or (< i (length a)) (< i (length b))))
+    (cond
+      ((>= i (length a)) (setq res 'lt))
+      ((>= i (length b)) (setq res 'gt))
+      (t
+        (setq av (nth i a)
+              bv (nth i b))
+        (cond
+          ((and (= (car av) 1) (= (car bv) 1))
+           (cond
+             ((< (cdr av) (cdr bv)) (setq res 'lt))
+             ((> (cdr av) (cdr bv)) (setq res 'gt))))
+          ((and (= (car av) 0) (= (car bv) 0))
+           (cond
+             ((< (ascii (cdr av)) (ascii (cdr bv))) (setq res 'lt))
+             ((> (ascii (cdr av)) (ascii (cdr bv))) (setq res 'gt))))
+          (t
+            ;; разные типы: символ «.» (46) перед цифровой группой
+            (if (= (car av) 0)
+              (setq res 'lt)
+              (setq res 'gt)))))))
+  (eq res 'lt))
+
+(defun mark:nat-less (a b)
+  (mark:nat-key< (mark:nat-key a) (mark:nat-key b)))
+
+;; Слой «Размеры» для таблицы ведомости (создаётся при отсутствии)
+(defun mark:tbl-layer (doc tbl / layers)
+  (if (null (tblsearch "LAYER" "Размеры"))
+    (progn
+      (setq layers (mark:ax-get doc "Layers"))
+      (if layers
+        (mark:ax-invoke layers "Add" "Размеры"))))
+  (mark:ax-put tbl "Layer" "Размеры"))
+
+;; Файл сверки «<имя чертежа> Шкала.txt»: индекс;размер_мм;источник
+(defun mark:scale-write-file (/ path f row i)
+  (if *mark:scale-final*
+    (progn
+      (setq path (strcat (getvar "dwgprefix")
+                         (vl-filename-base (getvar "dwgname"))
+                         " Шкала.txt"))
+      (setq f (open path "w"))
+      (if f
+        (progn
+          (write-line "индекс;размер_мм;источник" f)
+          (setq i 0)
+          (foreach row *mark:scale-final*
+            (setq i (1+ i))
+            (write-line
+              (strcat (itoa i) ";"
+                      (rtos (nth 0 row) 2 0) ";"
+                      (nth 1 row))
+              f))
+          (close f)
+          (mark:out (strcat "[OK] Шкала: " path)))
+        (mark:out "[WARN] Шкала не записана: файл недоступен.")))))
+
 (defun c:МАРКАРОВКАЗАП () (mark:main))
 (defun c:MARKZ () (mark:main))
 (defun c:МАРКАРОВКАЗАП () (mark:main))
