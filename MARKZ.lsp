@@ -109,7 +109,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.3")
+(setq *mark:rev*    "–ед. 48.4")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4171,6 +4171,7 @@
             msegs   nil
             rblocks nil
             glaz    nil
+            n-poly  0
             n-hidden 0
             n-open  0
             i       (sslength ss))
@@ -4199,11 +4200,11 @@
               (if (and (mark:strp nm)
                        (wcmatch (strcase nm) "*–»√≈Ћ№*"))
                 (setq rblocks (cons e rblocks))))))
-          ;; «амкнута€ полилини€ Ч контур €чейки: габарит без отступа
-          ;; (семантика 7-ѕолилини€), в оси не идЄт.
+          ;; –ед. 48.4: замкнута€ полилини€ Ч не каркас и не €чейка.
+          ;; —етка Ч по динамике, мультилини€м и лини€м каркаса;
+          ;; контур полилинии Ч только режимы точки и 7-ѕолилини€.
           ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
-           (setq bb (mark:cell-bb e))
-           (if bb (setq polys (cons bb polys))))
+           (setq n-poly (1+ n-poly)))
           ((member typ '("LINE" "ARC" "MLINE"))
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
@@ -4280,25 +4281,11 @@
       (foreach bb boxes
         (setq out (cons (append bb (mark:sec-geo-one bb vs2 hs)) out)))
       (setq boxes (reverse out))
-      ;; ѕолилинии-контуры: €чейка = габарит замкнутой полилинии, без
-      ;; отступа.  рупнее лимита Ч не €чейка, а контур участка.
-      (setq n-poly 0)
-      (foreach bb polys
-        (if (or (and (numberp *mark:fill-max-w*)
-                     (> (- (nth 2 bb) (nth 0 bb)) *mark:fill-max-w*))
-                (and (numberp *mark:fill-max-h*)
-                     (> (- (nth 3 bb) (nth 1 bb)) *mark:fill-max-h*)))
-          (setq n-poly (1+ n-poly))
-          (setq boxes (cons (append bb
-                                    (list (mark:round1 (- (nth 2 bb) (nth 0 bb)))
-                                          (mark:round1 (- (nth 3 bb) (nth 1 bb)))))
-                            boxes))))
-      (if polys
+      ;; –ед. 48.4: замкнутые полилинии €чейками не стали Ч только лог.
+      (if (> n-poly 0)
         (mark:out
-          (strcat "[INFO] ѕолилиний-контуров: " (itoa (length polys))
-                  (if (> n-poly 0)
-                    (strcat ", крупнее лимита пропущено: " (itoa n-poly))
-                    ""))))
+          (strcat "[INFO] «амкнутых полилиний пропущено: " (itoa n-poly)
+                  " Ч не каркас и не €чейки.")))
       ;; Ўкала Ѕлок 1: длины ригелей в свету Ч зеркало MarkZV –ед. 3.7.
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
       ;; ‘ильтр проЄмов: зона сетки, лог, пропуск €чеек с окнами/двер€ми.
@@ -7236,6 +7223,7 @@
             seen    nil
             polys   nil
             glaz    nil
+            n-poly  0
             i       (sslength ss))
       (while (> i 0)
         (setq i   (1- i)
@@ -7259,9 +7247,10 @@
               (if (and (mark:strp nm)
                        (wcmatch (strcase nm) "*–»√≈Ћ№*"))
                 (setq rblocks (cons e rblocks))))))
+          ;; –ед. 48.4: замкнута€ полилини€ Ч не каркас и не €чейка
+          ;; (контур полилинии Ч только режимы точки и 7-ѕолилини€).
           ((and (= typ "LWPOLYLINE") (mark:fill-lwpoly-closed? e))
-           (setq bb (mark:cell-bb e))
-           (if bb (setq polys (cons bb polys))))
+           (setq n-poly (1+ n-poly)))
           ((member typ '("LINE" "ARC" "MLINE"))
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
@@ -7291,17 +7280,11 @@
                vs    (append vs (car items))
                hs    (append hs (cadr items))
                boxes (mark:fill-items->cells vs hs))))
-      (setq n-poly 0)
-      (foreach bb polys
-        (if (or (and (numberp *mark:fill-max-w*)
-                     (> (- (nth 2 bb) (nth 0 bb)) *mark:fill-max-w*))
-                (and (numberp *mark:fill-max-h*)
-                     (> (- (nth 3 bb) (nth 1 bb)) *mark:fill-max-h*)))
-          (setq n-poly (1+ n-poly))
-          (setq boxes (cons (append bb
-                                    (list (mark:round1 (- (nth 2 bb) (nth 0 bb)))
-                                          (mark:round1 (- (nth 3 bb) (nth 1 bb)))))
-                            boxes))))
+      ;; –ед. 48.4: замкнутые полилинии €чейками не стали Ч только лог.
+      (if (> n-poly 0)
+        (mark:out
+          (strcat "[INFO] «амкнутых полилиний пропущено: " (itoa n-poly)
+                  " Ч не каркас и не €чейки.")))
       (setq vs2 (if (and vs hs) (mark:sec-columns vs hs) nil))
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
       ;; сопоставление: точка вставки блока = угол €чейки
@@ -7323,9 +7306,9 @@
       (if (> cnt 0)
         (progn
           (mark:out
-            (strcat "[ERROR] ¬не €чеек каркаса: " (itoa cnt)
-                    " заполнени(й) Ч марки не сформированы."))
-          (mark:note-error)))
+            (strcat "[WARN] ¬не €чеек каркаса: " (itoa cnt)
+                    " заполнени(й) Ч марка не формируетс€ (причина в TEST 13)."))
+          (mark:note-warning)))
       (setq *mark:fill-geo* (reverse out))
       (mark:out
         (strcat "[INFO]  аркас: €чеек " (itoa (length boxes))
