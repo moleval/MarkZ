@@ -77,6 +77,7 @@
 
 ;; –ед. 48.0: секции/€русы и шкала Ђв светуї (зеркало MarkZV)
 (setq *mark:fill-geo*    nil)     ;; (ename . (ширина секции высота €руса))
+(setq *mark:cell-hs*     nil)     ;; –ед. 48.8: высоты всех €чеек каркаса («-1)
 (setq *mark:scale1*      nil)     ;; Ѕлок 1: ключи длин ригелей, мм
 (setq *mark:scale-final* nil)     ;; ((размер источник) ...), –/«/–«
 ;; —колько блоков показывать в TEST 13
@@ -109,7 +110,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.7")
+(setq *mark:rev*    "–ед. 48.8")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1106,7 +1107,7 @@
 
 ;;;--------------------- TEST 09/10/11 Ч данные и нумераци€ ------------
 
-(defun mark:test-data (/ wlist hlist geo th)
+(defun mark:test-data (/ wlist hlist geo th h)
   (if *mark:fill-geo*
     (progn
       ;; –ед. 48.0: номера Ч шкала Ђв светуї (ригели + секции),
@@ -1120,6 +1121,12 @@
       (foreach geo *mark:fill-geo*
         (if (and (cdr geo) (numberp (caddr geo)))
           (setq th (cons (caddr geo) th))))
+      ;; –ед. 48.8 («-1): плюс высоты всех €чеек каркаса Ч €русна€ шкала
+      ;; не зависит от наличи€ заполнений в €чейках (проЄм, глуха€ зона).
+      ;; ќбъединение, а не подмена: высоты заполнений заведомо в шкале.
+      (foreach h *mark:cell-hs*
+        (if (numberp h)
+          (setq th (cons h th))))
       (setq hlist (mark:sort-unique (mark:positives th)))
       (setq *mark:widths*  wlist
             *mark:heights* hlist))
@@ -4190,7 +4197,8 @@
                                        vs2 out glaz)
   (mark:out "5-—етка-все-типы: каркас Ч блоки (динамика) и мультилинии; отрезки, дуги, полилинии Ч не каркас (–ед. 48.6).")
   (mark:out "¬ыберите объекты каркаса рамкой. Enter Ч отмена.")
-  (setq *mark:fill-geo* nil)
+  (setq *mark:fill-geo* nil
+        *mark:cell-hs*  nil)
   (setq ss (mark:fill-all-ss))
   (if (null ss)
     (list cells pts 'cancel)
@@ -4322,6 +4330,12 @@
       (foreach bb boxes
         (setq out (cons (append bb (mark:sec-geo-one bb vs2 hs)) out)))
       (setq boxes (reverse out))
+      ;; –ед. 48.8 («-1): высоты всех €чеек каркаса (включа€ проЄмные) Ч
+      ;; источник €русной шкалы: буквы не завис€т от наличи€ заполнений.
+      (setq *mark:cell-hs* nil)
+      (foreach bb boxes
+        (if (numberp (nth 5 bb))
+          (setq *mark:cell-hs* (cons (nth 5 bb) *mark:cell-hs*))))
       ;; –ед. 48.4: замкнутые полилинии €чейками не стали Ч только лог.
       (if (> n-poly 0)
         (mark:out
@@ -7350,6 +7364,14 @@
                   " Ч не каркас (контур Ч режимы 2/6/7).")))
       (setq vs2 (if (and vs hs) (mark:sec-columns vs hs) nil))
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
+      ;; –ед. 48.8 («-1): высоты всех €чеек каркаса (включа€ проЄмные
+      ;; и глухие) Ч источник €русной шкалы, как в режиме 5 ћј– ј«јѕ.
+      ;; “а же функци€, что дл€ заполнений (sec-geo-one, целые мм).
+      (setq *mark:cell-hs* nil)
+      (foreach bb boxes
+        (setq hit (mark:sec-geo-one bb vs2 hs))
+        (if (and hit (numberp (nth 1 hit)))
+          (setq *mark:cell-hs* (cons (nth 1 hit) *mark:cell-hs*))))
       ;; сопоставление: точка вставки блока = угол €чейки
       (setq out nil
             cnt 0)
