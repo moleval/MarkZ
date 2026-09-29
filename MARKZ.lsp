@@ -109,7 +109,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.2")
+(setq *mark:rev*    "Ред. 48.3")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4151,7 +4151,7 @@
 (defun mark:fill-mode-all-grid (cells pts / ss i e ed typ nm r segs blocks
                                        seen n-open axes vs hs items boxes
                                        polys n-poly bb msegs rblocks n-hidden
-                                       vs2 out)
+                                       vs2 out glaz)
   (mark:out "5-Сетка-все-типы: блоки, мультилинии, линии, полилинии, дуги.")
   (mark:out "Выберите объекты каркаса рамкой. Enter — отмена.")
   (setq *mark:fill-geo* nil)
@@ -4170,6 +4170,7 @@
             polys   nil
             msegs   nil
             rblocks nil
+            glaz    nil
             n-hidden 0
             n-open  0
             i       (sslength ss))
@@ -4184,6 +4185,9 @@
           ((= typ "INSERT")
            (setq nm (mark:fill-eff-name e))
            (cond
+             ;; Ред. 48.3: «Атрибуты витража» — префикс для марок (TEST 02/03)
+             ((mark:blk-match? e *mark:block-glazing*)
+              (setq glaz (cons e glaz)))
              ((mark:fill-skip-block? nm) nil)
              ((mark:fill-opening-block? nm)
               (setq n-open (1+ n-open)))
@@ -4221,6 +4225,13 @@
         (mark:out
           (strcat "[INFO] Блоков проёма в выборе пропущено: " (itoa n-open)
                   " — окно/дверь не каркас.")))
+      ;; Ред. 48.3: «Атрибуты витража» из выбора каркаса — префикс марок
+      (if glaz
+        (progn
+          (setq *mark:glazings* (reverse glaz))
+          (mark:out
+            (strcat "[INFO] \"Атрибуты витража\": " (itoa (length glaz))
+                    " — префикс для марок."))))
       (mark:out
         (strcat "[INFO] Каркас: блоков " (itoa (length blocks))
                 ", отрезков " (itoa (length segs))))
@@ -7210,7 +7221,7 @@
 ;; секции/ярусы на месте (решение заказчика 2026-09-29).
 (defun mark:sec-standalone (/ ss i e ed typ nm r segs blocks msegs rblocks
                                seen polys axes vs hs items boxes bb n-poly
-                               vs2 out ins hit cnt)
+                               vs2 out ins hit cnt glaz)
   (mark:out "Для расчёта секций выберите каркас рамкой. Enter — отмена.")
   (setq ss (vl-catch-all-apply 'ssget nil))
   (if (or (vl-catch-all-error-p ss) (null ss))
@@ -7224,6 +7235,7 @@
             rblocks nil
             seen    nil
             polys   nil
+            glaz    nil
             i       (sslength ss))
       (while (> i 0)
         (setq i   (1- i)
@@ -7235,6 +7247,9 @@
           ((= typ "INSERT")
            (setq nm (mark:fill-eff-name e))
            (cond
+             ;; Ред. 48.3: «Атрибуты витража» — префикс для марок
+             ((mark:blk-match? e *mark:block-glazing*)
+              (setq glaz (cons e glaz)))
              ((mark:fill-skip-block? nm) nil)
              ((mark:fill-opening-block? nm) nil)
              ((mark:fill-block-seen? seen nm e) nil)
@@ -7258,6 +7273,9 @@
            (setq r (vl-catch-all-apply 'mark:fill-extract-segs (list e)))
            (if (and r (not (vl-catch-all-error-p r)))
              (setq segs (append (mark:fill-lines-hw0 r) segs))))))
+      ;; Ред. 48.3: «Атрибуты витража» из выбора каркаса — префикс марок
+      (if glaz
+        (setq *mark:glazings* (reverse glaz)))
       (setq boxes nil
             vs    nil
             hs    nil)
@@ -7447,7 +7465,9 @@
 
 ;; Разбор марки с подындексами: "Б.а12.1" > ("Б.а" "12.1")
 (defun mark:ar-parse2 (m / tail i n letter num)
-  (setq tail (mark:ar-strip-suffix (mark:trim m)))
+  ;; Ред. 48.3: префикс «Витраж» отрезаем (ar-tail, как в ar-parse);
+  ;; точку подындекса номера сохраняем: «Т-1 С10.1» -> («С» «10.1»)
+  (setq tail (mark:ar-tail (mark:ar-strip-suffix (mark:trim m))))
   (if (or (null tail) (= tail ""))
     nil
     (progn
@@ -7474,7 +7494,8 @@
                (= (substr tail i 1) ".")
                (mark:ar-digit? (substr tail (+ i 1) 1)))
         (progn
-          (setq i (+ i 1))
+          (setq num (strcat num ".")
+                i   (+ i 1))
           (while (and (<= i n) (mark:ar-digit? (substr tail i 1)))
             (setq num (strcat num (substr tail i 1))
                   i   (1+ i)))))
