@@ -98,6 +98,10 @@
 ;; Ред. 48.29: порог разрыва между витражами, мм — меньше порога
 ;; один витраж (проёмные ячейки не разрывают); у ТБ-1/В-7 ~9.9 м
 (setq *mark:vz-gap*     2500.0)
+;; Ред. 48.30: карта (ename . префикс витража) — совместная маркировка;
+;; режим: "joint" (общие шкалы) / "separate" (свои per витраж) / nil
+(setq *mark:vz-map*     nil)
+(setq *mark:vz-mode*    nil)
 
 ;; Сетка заполнений
 (setq *mark:fill-tol*    30.0)    ; мм — выравнивание осей
@@ -114,7 +118,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.29")
+(setq *mark:rev*    "Ред. 48.30")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -646,6 +650,9 @@
            *mark:glazings*     (reverse glazings)
            *mark:others*       others
            *mark:found-names*  (reverse names))
+     ;; Ред. 48.30: новый выбор — карта витражей недействительна
+     (setq *mark:vz-map*  nil
+           *mark:vz-mode* nil)
      (mark:out "")
      (mark:out (strcat "[INFO] Выбрано объектов: " (itoa *mark:sel-total*)))
      (mark:out (strcat "[INFO] Заполнений: " (itoa (length *mark:fills*))))
@@ -931,10 +938,13 @@
      (mark:out "[TEST 02] \"Атрибуты витража\" — FOUND")
      (mark:out (strcat "Количество: " (itoa (length *mark:glazings*))))
      (if (> (length *mark:glazings*) 1)
-       (progn
+       (if *mark:vz-map*
          (mark:out
-           "[WARN] Найдено несколько блоков \"Атрибуты витража\". Используется первый.")
-         (mark:note-warning)))
+           "[INFO] Несколько блоков \"Атрибуты витража\" — совместная маркировка: префикс каждого витража в его марках.")
+         (progn
+           (mark:out
+             "[WARN] Найдено несколько блоков \"Атрибуты витража\". Используется первый.")
+           (mark:note-warning))))
      (setq g   (car *mark:glazings*)
            obj (mark:vla g)
            res (mark:find-attr g *mark:attr-vitrage*))
@@ -962,6 +972,10 @@
         (setq val (mark:trim (cadr res)))
         (mark:out "[TEST 03] Атрибут \"Витраж\" — OK")
         (mark:out (strcat "Значение: " val))
+        ;; Ред. 48.30: совместная маркировка — перечень витражей
+        (if (and *mark:vz-map* (> (length (mark:vz-map-pfxs)) 1))
+          (mark:out
+            (strcat "Значения: " (mark:vz-join (mark:vz-map-pfxs) ", "))))
         (setq *mark:prefix* val
               *mark:prefix-found* t))))))
 
@@ -1342,7 +1356,7 @@
     (setq suffix (mark:get-special-suffix (mark:rec-get r 'vis))
           m      (if (and (mark:rec-get r 'letter)
                           (numberp (mark:rec-get r 'hnum)))
-                   (mark:compose *mark:prefix*
+                   (mark:compose (mark:vz-rec-pfx r)
                                  (mark:rec-get r 'letter)
                                  (mark:rec-get r 'subl)
                                  (mark:rec-get r 'hnum)
@@ -2035,9 +2049,14 @@
   (mark:out
     (mark:pad-line "\"Атрибуты витража\":"
                    (itoa (length *mark:glazings*))))
-  (mark:out
-    (mark:pad-line "Витраж:"
-                   (if *mark:prefix-found* *mark:prefix* "—")))
+  ;; Ред. 48.30: совместная маркировка — перечень витражей
+  (if (and *mark:vz-map* (> (length (mark:vz-map-pfxs)) 1))
+    (mark:out
+      (mark:pad-line "Витражи:"
+                     (mark:vz-join (mark:vz-map-pfxs) ", ")))
+    (mark:out
+      (mark:pad-line "Витраж:"
+                     (if *mark:prefix-found* *mark:prefix* "—"))))
   (mark:out
     (mark:pad-line "Шкала секций (номера):"
                    (itoa (length *mark:widths*))))
@@ -2273,19 +2292,35 @@
   (reverse blocks))
 
 ;; Сортировка: Тип -> Высота -> Ширина -> Марка
-(defun mtab:sort-less (a b / ta tb ma mb)
-  (setq ta (strcase (car a)) tb (strcase (car b))
-        ma (strcase (cadddr a)) mb (strcase (cadddr b)))
+;; Ред. 48.30: разделение марки — "ТБ-1 И3.2" даёт ("ТБ-1" "И3.2");
+;; "Г1" даёт ("" "Г1") — витраж и маркировка
+(defun mtab:mark-split (m / cl i sp)
+  (setq cl (vl-string->list m)
+        i  0
+        sp nil)
+  (foreach c cl
+    (if (= c 32)
+      (setq sp i))
+    (setq i (1+ i)))
+  (if sp
+    (list (substr m 1 sp) (substr m (+ sp 2)))
+    (list "" m)))
+
+;; Ред. 48.30: сортировка ведомости — тип, витраж, маркировка
+(defun mtab:sort-less (a b / ta tb pa pb)
+  (setq ta (strcase (car a)) tb (strcase (car b)))
   (cond
     ((< ta tb) t)
     ((> ta tb) nil)
-    ((< (cadr a) (cadr b)) t)
-    ((> (cadr a) (cadr b)) nil)
-    ((< (caddr a) (caddr b)) t)
-    ((> (caddr a) (caddr b)) nil)
-    ((mark:nat-less ma mb) t)
-    ((mark:nat-less mb ma) nil)
-    (t nil)))
+    (t
+     (setq pa (mtab:mark-split (cadddr a))
+           pb (mtab:mark-split (cadddr b)))
+     (cond
+       ((mark:nat-less (car pa) (car pb)) t)
+       ((mark:nat-less (car pb) (car pa)) nil)
+       ((mark:nat-less (cadr pa) (cadr pb)) t)
+       ((mark:nat-less (cadr pb) (cadr pa)) nil)
+       (t nil)))))
 
 ;; Агрегация (type h w mark) -> (type h w mark count)
 (defun mtab:aggregate (blocks / acc rec key found)
@@ -7086,6 +7121,47 @@
       (setq out (cons rec out))))
   (setq *mark:fill-geo* (reverse out)))
 
+;; Префикс кластера: значение «Витраж» его блока ("" без блока)
+(defun mark:vz-pfx-of (blocks / g res)
+  (if blocks
+    (progn
+      (setq g   (car blocks)
+            res (mark:find-attr g *mark:attr-vitrage*))
+      (if (and (car res) (mark:strp (cadr res)) (/= (mark:trim (cadr res)) ""))
+        (mark:trim (cadr res))
+        ""))
+    ""))
+
+;; Имена витражей по порядку кластеров (для шапки лога)
+(defun mark:vz-names (cls / out p)
+  (setq out nil)
+  (foreach c cls
+    (setq p (mark:vz-pfx-of (cadr c)))
+    (setq out (cons (if (= p "") "без блока" p) out)))
+  (reverse out))
+
+;; Карта ename -> префикс витража (совместная маркировка)
+(defun mark:vz-map-build (cls / map)
+  (setq map nil)
+  (foreach c cls
+    (foreach e (car c)
+      (setq map (cons (cons e (mark:vz-pfx-of (cadr c))) map))))
+  (reverse map))
+
+;; Префикс записи: из карты, иначе общий *mark:prefix*
+(defun mark:vz-rec-pfx (r / e p)
+  (setq e (mark:rec-get r 'ename)
+        p (if *mark:vz-map* (cdr (assoc e *mark:vz-map*)) nil))
+  (if p p *mark:prefix*))
+
+;; Уникальные префиксы карты (для ИТОГ и TEST 03)
+(defun mark:vz-map-pfxs (/ out)
+  (setq out nil)
+  (foreach p *mark:vz-map*
+    (if (not (member (cdr p) out))
+      (setq out (cons (cdr p) out))))
+  (reverse out))
+
 ;; Кластеры + привязка блоков «Атрибуты витража».
 ;; Возвращает ((fills blocks) ...), слева направо.
 (defun mark:vz-split (fills glazings / cls res c g pt d best bd r blks out)
@@ -7129,7 +7205,7 @@
 
 ;; Этап МАРКАРОВКАЗАП по витражам: один кластер — как раньше
 ;; (лог прежний); несколько — полный блок диагностики per витраж
-(defun mark:vz-marks (/ af ag ageo cls n i c was-reuse)
+(defun mark:vz-marks (/ af ag ageo cls n i c was-reuse ans)
   (if (and (not *mark:reuse-sel*) (null *mark:fills*))
     (mark:select))
   (if *mark:fills*
@@ -7139,24 +7215,51 @@
             ageo *mark:fill-geo*
             cls  (mark:vz-split af ag)
             n    (length cls)
-            i    0)
+            i    0
+            *mark:vz-map*  nil
+            *mark:vz-mode* nil)
       (setq was-reuse       *mark:reuse-sel*
             *mark:reuse-sel* t)
-      (if (= n 1)
-        (mark:main)
+      ;; Ред. 48.30: несколько витражей — спрашиваем режим маркировки
+      (if (> n 1)
         (progn
           (mark:out "")
           (mark:out
-            (strcat "[INFO] Витражей в выборе: " (itoa n)))
-          (foreach c cls
-            (setq i (1+ i))
-            (mark:out "")
-            (mark:out
-              (strcat "--- Витраж " (itoa i) " из " (itoa n) ": "
-                      (mark:vz-title (cadr c))
-                      " — заполнений " (itoa (length (car c))) " ---"))
-            (mark:vz-set c ageo)
-            (mark:main))))
+            (strcat "[INFO] Витражей в выборе: " (itoa n)
+                    " (" (mark:vz-join (mark:vz-names cls) ", ") ")"))
+          (initget "Совместная Раздельная")
+          (setq ans (getkword
+                      "\nМаркировка нескольких витражей [Совместная/Раздельная] <Совместная>: "))
+          (setq *mark:vz-mode*
+                (if (member ans '("Раздельная")) "separate" "joint"))
+          (mark:out "")
+          (mark:out
+            (if (= *mark:vz-mode* "joint")
+              "[INFO] Совместная: шкалы секций и строк общие на все витражи, марки с префиксами витражей."
+              "[INFO] Раздельная: каждому витражу свои шкалы секций и строк."))))
+      (cond
+        ;; совместная: один расчёт на всё выделение, per-витражный префикс
+        ((= *mark:vz-mode* "joint")
+         (progn
+           (setq *mark:vz-map* (mark:vz-map-build cls))
+           (mark:main)))
+        ;; раздельная: полный блок диагностики per витраж
+        ((= *mark:vz-mode* "separate")
+         (progn
+           (mark:out "")
+           (mark:out
+             (strcat "[INFO] Витражей в выборе: " (itoa n)))
+           (foreach c cls
+             (setq i (1+ i))
+             (mark:out "")
+             (mark:out
+               (strcat "--- Витраж " (itoa i) " из " (itoa n) ": "
+                       (mark:vz-title (cadr c))
+                       " — заполнений " (itoa (length (car c))) " ---"))
+             (mark:vz-set c ageo)
+             (mark:main))))
+        ;; один витраж — прежний путь (лог побайтово)
+        (t (mark:main)))
       (setq *mark:reuse-sel* was-reuse
             *mark:fills*     af
             *mark:glazings*  ag
