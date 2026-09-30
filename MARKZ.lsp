@@ -111,7 +111,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.19")
+(setq *mark:rev*    "–ед. 48.20")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1111,23 +1111,31 @@
 (defun mark:test-data (/ wlist hlist geo th h)
   (if *mark:fill-geo*
     (progn
-      ;; –ед. 48.0: номера Ч шкала Ђв светуї (ригели + секции),
-      ;; буквы Ч высоты €русов.
+      ;; –ед. 48.20: номера Ч только фактические столбцы,
+      ;; буквы Ч только фактические строки заполнений.
       (setq *mark:scale-final* (mark:sec-scale-full))
+      ;; –ед. 48.20: шкала номеров Ч secw из геометрии заполнений;
+      ;; –-длины шкалы осей номера не резервируют: пропусков
+      ;; номеров нет (отмена зеркала MarkZV; “Ѕ-1: 450 больше не
+      ;; занимает є1, столбцы нумеруютс€ 550=є1 Е 1450=є5; ¬-7:
+      ;; 9 столбцов є1Еє9). scale-final остаЄтс€ дл€ источника
+      ;; –/–«/« и файла Ўкала.txt.
       (setq wlist nil)
-      (foreach geo *mark:scale-final*
-        (setq wlist (cons (float (nth 0 geo)) wlist)))
-      (setq wlist (reverse wlist)
+      (foreach geo *mark:fill-geo*
+        (if (and (cdr geo) (numberp (cadr geo)))
+          (setq wlist (cons (float (mark:sec-key (cadr geo))) wlist))))
+      (setq wlist (mark:sort-unique (mark:positives wlist))
             th    nil)
       (foreach geo *mark:fill-geo*
         (if (and (cdr geo) (numberp (caddr geo)))
           (setq th (cons (caddr geo) th))))
-      ;; –ед. 48.8 («-1): плюс высоты всех €чеек каркаса Ч €русна€ шкала
-      ;; не зависит от наличи€ заполнений в €чейках (проЄм, глуха€ зона).
-      ;; ќбъединение, а не подмена: высоты заполнений заведомо в шкале.
-      (foreach h *mark:cell-hs*
-        (if (numberp h)
-          (setq th (cons h th))))
+      ;; –ед. 48.20 (отмена 48.8/«-1): шкала строк Ч только
+      ;; фактические строки заполнений (th = высоты строк-
+      ;; родителей). ячейки каркаса без заполнений (проЄмы,
+      ;; глухие зоны) шкалу не сдвигают: пропусков букв нет
+      ;; (“Ѕ-1: ƒ = 1250, проЄмные 1150 букву не резервируют).
+      ;; ¬ысоты подъ€чеек (750/1015) в шкалу не вход€т Ч они
+      ;; получают литеры .а/.б внутри строки-родител€.
       (setq hlist (mark:sort-unique (mark:positives th)))
       (setq *mark:widths*  wlist
             *mark:heights* hlist))
@@ -7376,14 +7384,16 @@
     (setq sorted (mark:sec-ins-row sorted row)))
   sorted)
 
-;; »сточник номера секции: –«/«/–
-(defun mark:sec-src-of (n / row)
+;; »сточник секции: –«/«/–. –ед. 48.20: поиск по –ј«ћ≈–” столбца Ч
+;; позиции scale-final больше не совпадают с номерами (номера
+;; сплошные по фактическим столбцам, –-длины в нумерации не участвуют).
+(defun mark:sec-src-of (w / row sc)
   (setq row nil)
-  (if (and (numberp n)
-           *mark:scale-final*
-           (<= n (length *mark:scale-final*))
-           (> n 0))
-    (setq row (nth (1- n) *mark:scale-final*)))
+  (if (and (numberp w) *mark:scale-final*)
+    (foreach sc *mark:scale-final*
+      (if (and (null row)
+               (mark:same-num? w (nth 0 sc)))
+        (setq row sc))))
   (if row
     (nth 1 row)
     "?"))
@@ -7580,8 +7590,7 @@
 ;; TEST 16: таблицы секций и €русов (“« 3.0, І7.1)
 (defun mark:test-16 (/ rows lines r n row q size src subs cnt div k sw-cnt
                         lrows llines letter lsize lsubs lhidx sh-cnt ln
-                        wkeys wk sw hkeys hk sl used empty sc i
-                        hused hempty hs j)
+                        wkeys wk sw hkeys hk sl)
   (mark:out "")
   (mark:out "[TEST 16] —екции и €русы")
   (setq rows nil)
@@ -7604,7 +7613,7 @@
     (setq n    (nth 0 row)
           r    (car (nth 1 row))
           size (mark:rec-get r 'secw)
-          src  (mark:sec-src-of n)
+          src  (mark:sec-src-of size)
           subs nil
           wkeys nil
           cnt  0)
@@ -7651,26 +7660,8 @@
       (mark:out "  є   W      источник  подъ€чейки")
       (foreach ln (reverse lines)
         (mark:out ln))))
-  ;; –ед. 48.18: номера шкалы, у которых нет своего столбца Ч
-  ;; ширина встречаетс€ только как подъ€чейка или –-длина
-  ;; (“Ѕ-1: є1 (450) Ч зеркало MarkZV, видимые столбцы с є2;
-  ;; ¬-7: є3 (650), є4 (660), є5 (750), є9 (1000) Ч подъ€чейки).
-  ;; “олько печать, нумераци€ не мен€етс€.
-  (setq used  nil
-        empty nil
-        i     0)
-  (foreach row rows
-    (setq used (cons (nth 0 row) used)))
-  (foreach sc *mark:scale-final*
-    (setq i (1+ i))
-    (if (not (member i used))
-      (setq empty (cons (strcat "є" (itoa i)
-                                " (" (mark:fmt-raw (nth 0 sc)) ")")
-                        empty))))
-  (if empty
-    (mark:out
-      (strcat "[INFO] Ќомера шкалы без столбца: "
-              (mark:sec-join (reverse empty)))))
+  ;; –ед. 48.20: INFO-строка о номерах без столбца (48.18) сн€та Ч
+  ;; нумераци€ сплошна€ по фактическим столбцам, пропусков нет.
   ;; €русы: группировка по букве
   (setq lrows nil)
   (foreach r *mark:records*
@@ -7732,27 +7723,8 @@
         (strcat "  ярусов: " (itoa (length lrows))))
       (foreach ln (reverse llines)
         (mark:out ln))))
-  ;; –ед. 48.19: буквы €русной шкалы без заполнений Ч €чейки
-  ;; стали проЄмными (“Ѕ-1 после установки окон: ƒ 1150 Ч шкала
-  ;; по решению 48.8 остаЄтс€ по всем €чейкам каркаса).
-  ;; —имметри€ строки ЂЌомера шкалы без столбцаї (48.18).
-  ;; “олько печать, буквенна€ шкала не мен€етс€.
-  (setq hused  nil
-        hempty nil
-        j      0)
-  (foreach row lrows
-    (setq hused (cons (nth 0 row) hused)))
-  (foreach hs *mark:heights*
-    (if (not (member j hused))
-      (if (mark:letter-at j)
-        (setq hempty (cons (strcat (mark:letter-at j)
-                                   " (" (mark:fmt-raw hs) ")")
-                           hempty))))
-    (setq j (1+ j)))
-  (if hempty
-    (mark:out
-      (strcat "[INFO] Ѕуквы €русов без заполнений: "
-              (mark:sec-join (reverse hempty)))))
+  ;; –ед. 48.20: INFO-строка о буквах без заполнений (48.19) сн€та Ч
+  ;; шкала строк строитс€ по фактическим строкам, пропусков букв нет.
   (mark:out
     (strcat "  [INFO] ѕодъ€чеек по ширине: " (itoa sw-cnt)
             ", по высоте: " (itoa sh-cnt))))
@@ -7857,7 +7829,10 @@
   (mark:ax-put tbl "Layer" "–азмеры"))
 
 ;; ‘айл сверки Ђ<им€ чертежа> Ўкала.txtї: индекс;размер_мм;источник
-(defun mark:scale-write-file (/ path f row i)
+;; –ед. 48.20: индекс = номер фактического столбца (сплошна€
+;; шкала номеров). –-длины шкалы осей без столбца Ч в конце
+;; файла с индексом Ђ-ї и источником Ђ–ї.
+(defun mark:scale-write-file (/ path f row i w src rest)
   (if *mark:scale-final*
     (progn
       (setq path (strcat (getvar "dwgprefix")
@@ -7868,10 +7843,21 @@
         (progn
           (write-line "индекс;размер_мм;источник" f)
           (setq i 0)
-          (foreach row *mark:scale-final*
-            (setq i (1+ i))
+          (foreach w *mark:widths*
+            (setq i   (1+ i)
+                  src (mark:sec-src-of w))
             (write-line
               (strcat (itoa i) ";"
+                      (rtos w 2 0) ";"
+                      src)
+              f))
+          (setq rest nil)
+          (foreach row *mark:scale-final*
+            (if (null (mark:index-of *mark:widths* (nth 0 row)))
+              (setq rest (cons row rest))))
+          (foreach row (reverse rest)
+            (write-line
+              (strcat "-;"
                       (rtos (nth 0 row) 2 0) ";"
                       (nth 1 row))
               f))
