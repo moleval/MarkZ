@@ -110,7 +110,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.12")
+(setq *mark:rev*    "–ед. 48.13")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -7000,10 +7000,13 @@
        (not (mark:ent-hidden? e))))
 
 ;;  онец вертикального элемента попадает в горизонтальный: допуск по
-;; оси 30 мм; без wide Ч строго внутри пролЄта, wide Ч и у торца
-;; (зеркало mk:beam-hit; –ед. 48.11)
+;; оси 55 = полуширина 25 + допуск 30 (шов Ђпо граниї даЄт 25..50);
+;; без wide Ч строго внутри пролЄта, wide Ч и у торца
+;; (зеркало mk:beam-hit; –ед. 48.11, 48.13)
 (defun mark:sec-end-hit (x y hs wide / hit h e1 e2)
   ;; wide: допуск и к торцу горизонтали (–ед. 48.11, “-членени€).
+  ;; y-допуск 55, не 30: ствол Ђпо граниї даЄт 25..50 от оси
+  ;; горизонтали Ч тридцати не хватало (–ед. 48.13, колонка 1700).
   (setq hit nil)
   (foreach h hs
     (if (null hit)
@@ -7013,7 +7016,7 @@
                 e2 (+ (nth 2 h) 55.0))
           (setq e1 (+ (nth 1 h) 30.0)
                 e2 (- (nth 2 h) 30.0)))
-        (if (and (<= (abs (- y (nth 0 h))) 30.0)
+        (if (and (<= (abs (- y (nth 0 h))) 55.0)
                  (> x e1)
                  (< x e2))
           (setq hit t)))))
@@ -7036,6 +7039,21 @@
     (if (not (mark:sec-impost? v hs))
       (setq out (cons v out))))
   (reverse out))
+
+;;  олонка той же секции за краем-импостом: пересекает €рус €чейки
+;; и выходит за него по высоте Ч внутренние оси-обрезки колонки
+;; не считаютс€ (–ед. 48.13: права€ колонка дл€ €чейки 1000 x 3010
+;; в разделЄнной колонке 1700 Ч она ниже импоста на 320 мм).
+(defun mark:sec-tier-col? (items y0 y1 / sp a b hit)
+  (setq hit nil)
+  (foreach sp (mark:fill-item-spans items)
+    (setq a (nth 0 sp)
+          b (nth 1 sp))
+    (if (and (<= a y1)
+             (>= b y0)
+             (or (<= a (- y0 30.0))
+                 (>= b (+ y1 30.0))))
+      (setq hit t))))
 
 ;; √ео €чейки: (ширина секции высота €руса). √раницы секции Ч
 ;; соседние колонки-границы; €рус Ч горизонтали, охватывающие секцию.
@@ -7060,17 +7078,37 @@
         (if (mark:fill-covers (mark:fill-item-spans c)
                               y0 y1 (+ *mark:fill-tol* 25.0))
           (setq ccols (cons c ccols))))
-      (setq cols (reverse ccols))
-      (foreach c cols
+      (setq ccols (reverse ccols))
+      (foreach c ccols
         (setq face (mark:fill-inner-edge c 1.0))
         (if (and face (<= face (+ x0 1.0))
                  (or (null xl) (> face xl)))
           (setq xl face)))
-      (foreach c cols
+      (foreach c ccols
         (setq face (mark:fill-inner-edge c -1.0))
         (if (and face (>= face (- x1 1.0))
                  (or (null xr) (< face xr)))
           (setq xr face)))
+      ;; –ед. 48.13: край €чейки Ч импост (его нет в vs2), а колонки,
+      ;; охватывающей €чейку, дальше нет Ч секци€ продолжаетс€ за
+      ;; импост: граница Ч колонка, заход€ща€ на €рус €чейки и
+      ;; выход€ща€ за него по высоте (обрезки внутри колонки мимо).
+      (if (null xl)
+        (foreach c cols
+          (if (and (mark:sec-tier-col? c y0 y1)
+                   (setq face (mark:fill-inner-edge c 1.0))
+                   face
+                   (<= face (+ x0 1.0))
+                   (or (null xl) (> face xl)))
+            (setq xl face))))
+      (if (null xr)
+        (foreach c cols
+          (if (and (mark:sec-tier-col? c y0 y1)
+                   (setq face (mark:fill-inner-edge c -1.0))
+                   face
+                   (>= face (- x1 1.0))
+                   (or (null xr) (< face xr)))
+            (setq xr face))))
       (if (null xl) (setq xl x0))
       (if (null xr) (setq xr x1))
       (setq cov nil)
