@@ -80,6 +80,7 @@
 (setq *mark:cell-hs*     nil)     ;; –ед. 48.8: высоты всех €чеек каркаса («-1)
 (setq *mark:scale1*      nil)     ;; Ѕлок 1: ключи длин ригелей, мм
 (setq *mark:scale-final* nil)     ;; ((размер источник) ...), –/«/–«
+(setq *mark:sec-diag*    nil)     ;; –ед. 48.14: [DIAG] печать геометрии секций
 ;; —колько блоков показывать в TEST 13
 (setq *mark:test13-show*  10)
 ;; —колько строк ошибок показывать в одном тесте (остальное Ч сводка)
@@ -110,7 +111,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.13")
+(setq *mark:rev*    "–ед. 48.14")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4366,6 +4367,7 @@
                   " Ч не каркас (только мультилинии и динамика).")))
       ;; Ўкала Ѕлок 1: длины ригелей в свету Ч зеркало MarkZV –ед. 3.7.
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
+      (if *mark:sec-diag* (mark:sec-diag vs hs vs2))
       ;; ‘ильтр проЄмов: зона сетки, лог, пропуск €чеек с окнами/двер€ми.
       (foreach bb (mark:fill-filter-opening-cells boxes)
         (setq r (mark:fill-add cells pts bb)
@@ -7032,13 +7034,89 @@
       (and (mark:sec-end-hit (nth 0 v) (nth 2 v) hs nil)
            (mark:sec-end-hit (nth 0 v) (nth 1 v) hs t))))
 
-;;  олонки-границы секций: неимпостные вертикальные элементы
+;; —тойки-границы секций: неимпостные вертикальные элементы
 (defun mark:sec-columns (vs hs / out v)
   (setq out nil)
   (foreach v vs
     (if (not (mark:sec-impost? v hs))
       (setq out (cons v out))))
   (reverse out))
+
+;; [DIAG] –азбор секционной геометрии дл€ контрольного прогона:
+;; горизонтали, вертикали (стойка-граница/импост) и анализ концов
+;; границ через sec-end-hit (строго/торец). ¬ключаетс€ командой
+;; ћј– ј«јѕ√≈ќ, печатаетс€ один раз и сбрасывает флаг сама.
+;; “олько печать Ч расчЄты не мен€ет (–ед. 48.14).
+(defun mark:sec-diag (vs hs vs2 / sv sh v h dy n ks)
+  (setq *mark:sec-diag* nil)
+  (mark:out "[DIAG] === √еометри€ секций ===")
+  (mark:out
+    (strcat "[DIAG] ¬ертикалей " (itoa (length vs))
+            ", стоек-границ " (itoa (length vs2))
+            ", импостов " (itoa (- (length vs) (length vs2)))
+            ", горизонталей " (itoa (length hs)) "."))
+  (setq sh nil)
+  (foreach h hs
+    (setq sh (mark:sec-ins-ax sh h)))
+  (foreach h sh
+    (mark:out
+      (strcat "[DIAG] гор y=" (rtos (nth 0 h) 2 1)
+              " x=" (rtos (nth 1 h) 2 1) ".." (rtos (nth 2 h) 2 1)
+              " hw=" (rtos (nth 3 h) 2 0))))
+  (setq sv nil)
+  (foreach v vs
+    (setq sv (mark:sec-ins-ax sv v)))
+  (foreach v sv
+    (mark:out
+      (strcat "[DIAG] верт x=" (rtos (nth 0 v) 2 1)
+              " y=" (rtos (nth 1 v) 2 1) ".." (rtos (nth 2 v) 2 1)
+              " hw=" (rtos (nth 3 v) 2 0)
+              (if (member v vs2) " граница" " импост")))
+    (if (member v vs2)
+      (progn
+        (setq n 0)
+        (foreach h sh
+          (setq dy (- (nth 1 v) (nth 0 h)))
+          (if (<= (abs dy) 200.0)
+            (progn
+              (setq n (1+ n))
+              (mark:out
+                (strcat "[DIAG]   низ y=" (rtos (nth 1 v) 2 1)
+                        ": гор y=" (rtos (nth 0 h) 2 1)
+                        " x=" (rtos (nth 1 h) 2 1) ".." (rtos (nth 2 h) 2 1)
+                        " dy=" (rtos dy 2 1)
+                        (if (mark:sec-end-hit (nth 0 v) (nth 1 v) sh nil)
+                          " строго=ƒј" " строго=Ќ≈“")
+                        (if (mark:sec-end-hit (nth 0 v) (nth 1 v) sh t)
+                          " торец=ƒј" " торец=Ќ≈“"))))))
+        (if (= n 0)
+          (mark:out
+            (strcat "[DIAG]   низ y=" (rtos (nth 1 v) 2 1)
+                    ": нет горизонталей в +/-200")))
+        (setq n 0)
+        (foreach h sh
+          (setq dy (- (nth 2 v) (nth 0 h)))
+          (if (<= (abs dy) 200.0)
+            (progn
+              (setq n (1+ n))
+              (mark:out
+                (strcat "[DIAG]   верх y=" (rtos (nth 2 v) 2 1)
+                        ": гор y=" (rtos (nth 0 h) 2 1)
+                        " x=" (rtos (nth 1 h) 2 1) ".." (rtos (nth 2 h) 2 1)
+                        " dy=" (rtos dy 2 1)
+                        (if (mark:sec-end-hit (nth 0 v) (nth 2 v) sh nil)
+                          " строго=ƒј" " строго=Ќ≈“")
+                        (if (mark:sec-end-hit (nth 0 v) (nth 2 v) sh t)
+                          " торец=ƒј" " торец=Ќ≈“"))))))
+        (if (= n 0)
+          (mark:out
+            (strcat "[DIAG]   верх y=" (rtos (nth 2 v) 2 1)
+                    ": нет горизонталей в +/-200"))))))
+  (setq ks "")
+  (foreach h *mark:scale1*
+    (setq ks (strcat ks " " (itoa h))))
+  (mark:out (strcat "[DIAG] Ўкала – (длины ригелей, мм):" ks))
+  (mark:out "[DIAG] ===  онец геометрии секций ==="))
 
 ;;  олонка той же секции за краем-импостом: пересекает €рус €чейки
 ;; и выходит за него по высоте Ч внутренние оси-обрезки колонки
@@ -7449,6 +7527,7 @@
                   " Ч не каркас (контур Ч режимы 2/6/7).")))
       (setq vs2 (if (and vs hs) (mark:sec-columns vs hs) nil))
       (setq *mark:scale1* (mark:sec-scale1 msegs rblocks))
+      (if *mark:sec-diag* (mark:sec-diag vs hs vs2))
       ;; –ед. 48.8 («-1): высоты всех €чеек каркаса (включа€ проЄмные
       ;; и глухие) Ч источник €русной шкалы, как в режиме 5 ћј– ј«јѕ.
       ;; “а же функци€, что дл€ заполнений (sec-geo-one, целые мм).
@@ -7996,6 +8075,14 @@
               (list name grp))
             nil))))))
 
+;; –ед. 48.14: включить [DIAG]-печать геометрии секций на следующий
+;; ћј– ј«јѕ (»сточник —етка или «аполнени€). –асчЄты не мен€ет.
+(defun c:ћј– ј«јѕ√≈ќ ()
+  (setq *mark:sec-diag* t)
+  (mark:out "ћј– ј«јѕ√≈ќ Ч печать геометрии секций включена.")
+  (mark:out
+    "«апустите ћј– ј«јѕ: после строк про оси будет разбор вертикалей и горизонталей. ‘лаг сброситс€ сам после первой печати."))
+
 (defun c:ћј– ј«јѕ ќѕ»» (/ ss i e key acc groups g keep n extras ss2 grp skipped-spds)
   ;; –учной поиск по команде пользовател€. »щет полностью идентичные дубли
   ;; ЋёЅџ’ примитивов (тип, слой, цвет, геометри€, дл€ блоков Ч ещЄ и вс€
@@ -8217,6 +8304,7 @@
   "\nћј– ј«јѕЅЋќ    Ч вставка по €чейкам: 1/2 мультилинии, 3/4 динамика, 5/6 все-типы, 7-ѕолилини€"
   "\n“очка-динамика Ч отдельна€ команда; в списке: 4 или ƒ"
   "\nћј– ј«јѕ“≈—“   Ч проверка €чейки на тестовом блоке из линий"
-  "\nћј– ј«јѕ ќѕ»» Ч собрать полные дубли объектов в группу и подсветить (без удалени€)"
+  "\nћј– ј«јѕ√≈ќ   Ч [DIAG] печать геометрии секций: вертикали/импосты/горизонтали"
+        "\nћј– ј«јѕ ќѕ»» Ч собрать полные дубли объектов в группу и подсветить (без удалени€)"
   "\nћј– јƒ»ј√      Ч диагностика: что за блок стоит у окна/двери и как его видит LISP\n"))
 (princ)
