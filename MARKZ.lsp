@@ -95,6 +95,10 @@
 (setq *mark:ar-gap*     1000.0)
 (setq *mark:ar-line*    150.0)   ; шаг линий 1+, мм
 (setq *mark:ar-tol*     1.0)
+;; –ед. 48.24: метка р€довки (xdata) и допуски полосы сн€ти€
+(setq *mark:ar-xapp*    "MARKZ-AR") ; метка = префикс витража
+(setq *mark:ar-band*    2000.0)     ; глубина полосы без метки, мм
+(setq *mark:ar-margin*  250.0)      ; запас полосы вдоль р€да, мм
 
 ;; —етка заполнений
 (setq *mark:fill-tol*    30.0)    ; мм Ч выравнивание осей
@@ -111,7 +115,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.23")
+(setq *mark:rev*    "–ед. 48.24")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3148,13 +3152,74 @@
       (setq p e)))
   p)
 
-;;;--- —н€ть старую р€довку в зоне этой раскладки ----------------------
+;; –ед. 48.24: регистраци€ APPID дл€ метки р€довки
+(defun mark:ar-xreg (/ ok)
+  (if (tblsearch "APPID" *mark:ar-xapp*)
+    t
+    (progn
+      (setq ok (entmake (list (cons 0 "APPID")
+                              (cons 100 "AcDbRegAppTableRecord")
+                              (cons 2 *mark:ar-xapp*)
+                              (cons 70 0))))
+      (if ok t nil))))
+
+;; «аписать метку на вставку р€довки; t при успехе.
+;; ѕовторно метку не перезаписываем (вставки всегда свежие).
+(defun mark:ar-xput (e val / ed)
+  (if (and e (mark:strp val))
+    (if (mark:ar-xreg)
+      (progn
+        (setq ed (entget e (list *mark:ar-xapp*)))
+        (if (and ed (null (assoc -3 ed)))
+          (if (entmod (append ed
+                        (list (list -3
+                                (list *mark:ar-xapp*
+                                      (cons 1000 val))))))
+            (progn (entupd e) t)))))))
+
+;; ѕрочитать метку вставки р€довки; строка или nil
+(defun mark:ar-xget (e / ed xd rec)
+  (if (and e (mark:ar-xreg))
+    (progn
+      (setq ed (entget e (list *mark:ar-xapp*))
+            xd (if ed (cdr (assoc -3 ed)) nil))
+      (if xd
+        (progn
+          (setq rec (assoc *mark:ar-xapp* xd))
+          (if rec
+            (cdr (assoc 1000 (cdr rec)))))))))
+
+;; –ед. 48.24: префикс витража дл€ метки р€довки Ч без лога.
+;; ¬ ћј– ј«јѕ уже вычислен (ћј– ј–ќ¬ ј«јѕ, TEST 02/03); в одиночном
+;; ћј– ј«јѕ–яƒ Ч тихо из Ђјтрибутов витражаї выделени€.
+(defun mark:ar-prefix (/ g res)
+  (cond
+    (*mark:prefix-found* *mark:prefix*)
+    (*mark:glazings*
+     (progn
+       (setq g   (car *mark:glazings*)
+             res (mark:find-attr g *mark:attr-vitrage*))
+       (if (and (car res) (mark:strp (cadr res)))
+         (mark:trim (cadr res))
+         "")))
+    (t "")))
+
+;;;--- —н€ть старую р€довку --------------------------------------------
+;; –ед. 48.24: двухступенчато.
+;; 1) ћ≈“ ј: каждый блок р€довки несЄт xdata MARKZ-AR = префикс
+;;    витража. ѕрогон этого витража снимает ¬—ё его р€довку ÷≈Ћ» ќћ
+;;    Ч в любом месте чертежа. ѕеренос раскладки или самой р€довки
+;;    больше не оставл€ет Ђполовинуї (48.23 резал только полосами
+;;    у габарита текущей раскладки) и не задевает чужие витражи.
+;; 2) ‘ќЋЅ≈  без метки (создана до 48.24): полоса снизу и полоса
+;;    справа от габарита раскладки Ч те же места, куда ћј– ј«јѕ–яƒ
+;;    ставит р€ды. √лубина полосы *mark:ar-band* (было 6000 мм),
+;;    запас вдоль р€да *mark:ar-margin* (было 500 мм).
 ;; √руппу удал€ем отдельно: vla-Delete группы не удал€ет вставки.
-;; ѕолоса снизу и полоса справа Ч те же места, куда ћј– ј«јѕ–яƒ ставит р€ды.
-(defun mark:ar-erase-old (recs / ss i e n obj p x y
+(defun mark:ar-erase-old (recs pfx / ss i e n obj p x y
                               x0 y0 x1 y1 r victims
                               xmin xmax ymin ymax
-                              yb xb margin doc groups old name)
+                              yb xb doc groups old name xd hit)
   (setq xmin nil xmax nil ymin nil ymax nil n 0 victims nil)
   (foreach r recs
     (setq x0 (nth 5 r)
@@ -3174,11 +3239,10 @@
         (vl-catch-all-apply 'vla-Delete (list old)))))
   (if (and xmin xmax ymin ymax)
     (progn
-      (setq margin 500.0
-            yb     (- ymin *mark:ar-offset*)
-            xb     (+ xmax *mark:ar-offset*)
-            ss     (vl-catch-all-apply 'ssget
-                     (list "X" (list (cons 0 "INSERT")))))
+      (setq yb (- ymin *mark:ar-offset*)
+            xb (+ xmax *mark:ar-offset*)
+            ss (vl-catch-all-apply 'ssget
+                 (list "X" (list (cons 0 "INSERT")))))
       (if (and ss (not (vl-catch-all-error-p ss)))
         (progn
           (setq i (sslength ss))
@@ -3191,16 +3255,26 @@
             (setq p (cdr (assoc 10 (entget e))))
             (if p
               (progn
-                (setq x (float (car p))
-                      y (float (cadr p)))
-                (if (or (and (<= y yb)
-                             (>= y (- yb (* 40.0 *mark:ar-line*)))
-                             (>= x (- xmin margin))
-                             (<= x (+ xmax margin)))
-                        (and (>= x xb)
-                             (<= x (+ xb (* 40.0 *mark:ar-line*)))
-                             (>= y (- ymin margin))
-                             (<= y (+ ymax margin))))
+                (setq x   (float (car p))
+                      y   (float (cadr p))
+                      xd  (mark:ar-xget e)
+                      hit nil)
+                ;; 1) сво€ р€довка по метке Ч в любом месте чертежа
+                (if (and (mark:strp pfx) (/= pfx "")
+                         (mark:strp xd) (= xd pfx))
+                  (setq hit t))
+                ;; 2) фолбек: полосы у габарита раскладки
+                (if (null hit)
+                  (if (or (and (<= y yb)
+                               (>= y (- yb *mark:ar-band*))
+                               (>= x (- xmin *mark:ar-margin*))
+                               (<= x (+ xmax *mark:ar-margin*)))
+                          (and (>= x xb)
+                               (<= x (+ xb *mark:ar-band*))
+                               (>= y (- ymin *mark:ar-margin*))
+                               (<= y (+ ymax *mark:ar-margin*))))
+                    (setq hit t)))
+                (if hit
                   (progn
                     (setq obj (mark:vla e))
                     (if obj
@@ -3451,7 +3525,7 @@
                      x y w h obj keysW keysH
                      cnt-h cnt-v y0 x1
                      h-ents v-ents he ve
-                     h-items v-items pl)
+                     h-items v-items pl ar-pfx)
   (mark:cmd-line
     "ћј– ј«јѕ–яƒ Ч р€довка из блоков Ђ–€д заполненийї: номера снизу, буквы справа.")
   (mark:reset-state)
@@ -3512,8 +3586,12 @@
                  (progn
                    (if (and doc (not *mark:batch-undo*))
                      (mark:ax-invoke-ok doc "StartUndoMark" nil))
+                   ;; –ед. 48.24: метка р€довки = префикс витража;
+                   ;; стара€ р€довка витража снимаетс€ целиком
+                   ;; (48.23 резал полосами Ч при переносе оставались хвосты)
+                   (setq ar-pfx (mark:ar-prefix))
                    ;; старые буквы/номера на тех же точках иначе пропускает ar-exists
-                   (mark:ar-erase-old recs)
+                   (mark:ar-erase-old recs ar-pfx)
                    (setq placed (mark:ar-placed-pts))
 
                    ;; ===== √ќ–»«ќЌ“јЋ№ (номера по ширине) =====
@@ -3617,6 +3695,13 @@
                                  (mark:note-warning)))
                              (setq placed (cons (list x y) placed)
                                    cnt-v  (1+ cnt-v)))))))
+
+                   ;; –ед. 48.24: xdata-метка = префикс витража Ч
+                   ;; следующий прогон снимет р€довку целиком
+                   (if (and (mark:strp ar-pfx) (/= ar-pfx ""))
+                     (progn
+                       (foreach he h-ents (mark:ar-xput he ar-pfx))
+                       (foreach ve v-ents (mark:ar-xput ve ar-pfx))))
 
                    ;; группы: горизонталь и вертикаль раздельно
                    (mark:ar-make-group *mark:ar-group-h* h-ents)
