@@ -111,7 +111,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.18")
+(setq *mark:rev*    "–ед. 48.19")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -7580,7 +7580,8 @@
 ;; TEST 16: таблицы секций и €русов (“« 3.0, І7.1)
 (defun mark:test-16 (/ rows lines r n row q size src subs cnt div k sw-cnt
                         lrows llines letter lsize lsubs lhidx sh-cnt ln
-                        wkeys wk sw hkeys hk sl used empty sc i)
+                        wkeys wk sw hkeys hk sl used empty sc i
+                        hused hempty hs j)
   (mark:out "")
   (mark:out "[TEST 16] —екции и €русы")
   (setq rows nil)
@@ -7731,6 +7732,27 @@
         (strcat "  ярусов: " (itoa (length lrows))))
       (foreach ln (reverse llines)
         (mark:out ln))))
+  ;; –ед. 48.19: буквы €русной шкалы без заполнений Ч €чейки
+  ;; стали проЄмными (“Ѕ-1 после установки окон: ƒ 1150 Ч шкала
+  ;; по решению 48.8 остаЄтс€ по всем €чейкам каркаса).
+  ;; —имметри€ строки ЂЌомера шкалы без столбцаї (48.18).
+  ;; “олько печать, буквенна€ шкала не мен€етс€.
+  (setq hused  nil
+        hempty nil
+        j      0)
+  (foreach row lrows
+    (setq hused (cons (nth 0 row) hused)))
+  (foreach hs *mark:heights*
+    (if (not (member j hused))
+      (if (mark:letter-at j)
+        (setq hempty (cons (strcat (mark:letter-at j)
+                                   " (" (mark:fmt-raw hs) ")")
+                           hempty))))
+    (setq j (1+ j)))
+  (if hempty
+    (mark:out
+      (strcat "[INFO] Ѕуквы €русов без заполнений: "
+              (mark:sec-join (reverse hempty)))))
   (mark:out
     (strcat "  [INFO] ѕодъ€чеек по ширине: " (itoa sw-cnt)
             ", по высоте: " (itoa sh-cnt))))
