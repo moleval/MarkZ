@@ -6995,9 +6995,10 @@
           rest  (cdr rest)
           queue cur)
     (while queue
+      ;; e0 — запись (ename x0 y0 x1 y1) из очереди: bbox уже при ней
       (setq e0    (car queue)
             queue (cdr queue)
-            bb0   (cdr (assoc e0 bbs))
+            bb0   (cdr e0)
             hit   nil)
       (foreach r rest
         (if (mark:vz-near? bb0 (cdr r))
@@ -7087,7 +7088,7 @@
 
 ;; Кластеры + привязка блоков «Атрибуты витража».
 ;; Возвращает ((fills blocks) ...), слева направо.
-(defun mark:vz-split (fills glazings / cls res g pt d best bd r blks out)
+(defun mark:vz-split (fills glazings / cls res c g pt d best bd r blks out)
   (setq cls (mark:vz-clusters fills)
         res nil)
   (foreach c cls
