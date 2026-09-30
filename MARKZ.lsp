@@ -111,7 +111,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.21")
+(setq *mark:rev*    "–ед. 48.22")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1157,13 +1157,13 @@
        (mark:out "[TEST 09] ”никальные размеры Ч OK")
        (mark:out "")
        (mark:out (strcat "–азмеров шкалы (в свету): " (itoa (length wlist))))
-       (mark:out (strcat "ярусов (буквы): " (itoa (length hlist))))
+       (mark:out (strcat "—трок (буквы): " (itoa (length hlist))))
        (mark:out "")
        (mark:out
          (strcat "Ўкала: " (mark:fmt-raw (car wlist))
                  " ... " (mark:fmt-raw (car (reverse wlist)))))
        (mark:out
-         (strcat "ярус: " (mark:fmt-raw (car hlist))
+         (strcat "—трока: " (mark:fmt-raw (car hlist))
                  " ... " (mark:fmt-raw (car (reverse hlist)))))))
     (t
      (progn
@@ -1174,7 +1174,7 @@
   ;; TEST 10 Ч буквы по €русам. ѕосле списка продолжаем јј, јЅ, Е Ѕј, ЅЅ.
   (mark:out "")
   (mark:out "[TEST 10] Ѕуквенна€ маркировка Ч OK")
-  (mark:out (strcat "ярусов: " (itoa (length hlist))))
+  (mark:out (strcat "—трок: " (itoa (length hlist))))
   (mark:out
     (strcat "Ѕукв в списке: " (itoa (length *mark:letters*))
             ". ƒальше јј, јЅ, Е Ѕј, ЅЅ."))
@@ -1498,9 +1498,9 @@
   (if (> qcnt 0)
     (progn
       (mark:out (strcat "[DIAG] Ђ?ї в базисе: " (itoa qcnt)
-                        " Ч буква €руса или номер секции не определены."))
+                        " Ч буква строки или номер секции не определены."))
       (mark:out "        “аким блокам марки не пишутс€ Ч подробности в TEST 13:")
-      (mark:out "        нет гео секции / нет буквы €руса / нет номера шкалы.")))
+      (mark:out "        нет гео секции / нет буквы строки / нет номера шкалы.")))
   conflicts)
 
 (defun mark:diag-bases-str (bases / out b)
@@ -1537,7 +1537,7 @@
           (cons
             (strcat "Ѕлок є" (itoa (mark:rec-get r 'idx)) ": марка не сформирована"
                     (cond
-                      ((null (mark:rec-get r 'letter)) " Ч нет буквы €руса.")
+                      ((null (mark:rec-get r 'letter)) " Ч нет буквы строки.")
                       ((null (mark:rec-get r 'hnum)) " Ч нет номера шкалы.")
                       (t ".")))
             bad)))))
@@ -2028,7 +2028,7 @@
     (mark:pad-line "Ўкала секций (номера):"
                    (itoa (length *mark:widths*))))
   (mark:out
-    (mark:pad-line "Ўкала €русов (буквы):"
+    (mark:pad-line "Ўкала строк (буквы):"
                    (itoa (length *mark:heights*))))
   (mark:out (mark:pad-line "—темалит:" (itoa *mark:cnt-stem*)))
   (mark:out (mark:pad-line "—эндвич:"  (itoa *mark:cnt-sand*)))
@@ -3473,7 +3473,7 @@
                (mark:out
                  (strcat "[INFO] »ндексы р€довки: номер=секци€ ("
                          (itoa (length *mark:widths*))
-                         "), буква=€рус ("
+                         "), буква=строка ("
                          (itoa (length *mark:heights*))
                          ")."))
 
@@ -7592,7 +7592,7 @@
                         lrows llines letter lsize lsubs lhidx sh-cnt ln
                         wkeys wk sw hkeys hk sl)
   (mark:out "")
-  (mark:out "[TEST 16] —екции и €русы")
+  (mark:out "[TEST 16] —екции и строки")
   (setq rows nil)
   (foreach r *mark:records*
     (setq n (mark:rec-get r 'hnum))
@@ -7720,7 +7720,7 @@
   (if lrows
     (progn
       (mark:out
-        (strcat "  ярусов: " (itoa (length lrows))))
+        (strcat "  —трок: " (itoa (length lrows))))
       (foreach ln (reverse llines)
         (mark:out ln))))
   ;; –ед. 48.20: INFO-строка о буквах без заполнений (48.19) сн€та Ч
