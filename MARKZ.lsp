@@ -110,7 +110,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.10")
+(setq *mark:rev*    "–ед. 48.11")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -6987,23 +6987,35 @@
   (and (mark:fill-shown? e)
        (not (mark:ent-hidden? e))))
 
-;;  онец вертикального элемента попадает в середину горизонтального:
-;; допуск по оси 30 мм, строго внутри пролЄта (зеркало mk:beam-hit)
-(defun mark:sec-end-hit (x y hs / hit h)
+;;  онец вертикального элемента попадает в горизонтальный: допуск по
+;; оси 30 мм; без wide Ч строго внутри пролЄта, wide Ч и у торца
+;; (зеркало mk:beam-hit; –ед. 48.11)
+(defun mark:sec-end-hit (x y hs wide / hit h e1 e2)
+  ;; wide: допуск и к торцу горизонтали (–ед. 48.11, “-членени€).
   (setq hit nil)
   (foreach h hs
-    (if (and (null hit)
-             (<= (abs (- y (nth 0 h))) 30.0)
-             (> x (+ (nth 1 h) 30.0))
-             (< x (- (nth 2 h) 30.0)))
-      (setq hit t)))
+    (if (null hit)
+      (progn
+        (if wide
+          (setq e1 (- (nth 1 h) 55.0)
+                e2 (+ (nth 2 h) 55.0))
+          (setq e1 (+ (nth 1 h) 30.0)
+                e2 (- (nth 2 h) 30.0)))
+        (if (and (<= (abs (- y (nth 0 h))) 30.0)
+                 (> x e1)
+                 (< x e2))
+          (setq hit t)))))
   hit)
 
-;; »мпост (Ђтї): оба конца вертикального элемента упираютс€ в середины
-;; горизонтальных (зеркало mk:split-tjoints MarkZV) Ч не граница секции.
+;; »мпост (Ђтї): вертикаль упираетс€ в горизонталь Ч хот€ бы один конец
+;; строго в середину пролЄта, другой не дальше торца (зеркало
+;; mk:split-tjoints MarkZV; –ед. 48.11: “-членени€ Ч ствол в торец
+;; укороченной горизонтали). ќба конца только у торцов Ч колонка.
 (defun mark:sec-impost? (v hs)
-  (and (mark:sec-end-hit (nth 0 v) (nth 1 v) hs)
-       (mark:sec-end-hit (nth 0 v) (nth 2 v) hs)))
+  (or (and (mark:sec-end-hit (nth 0 v) (nth 1 v) hs)
+           (mark:sec-end-hit (nth 0 v) (nth 2 v) hs t))
+      (and (mark:sec-end-hit (nth 0 v) (nth 2 v) hs)
+           (mark:sec-end-hit (nth 0 v) (nth 1 v) hs t))))
 
 ;;  олонки-границы секций: неимпостные вертикальные элементы
 (defun mark:sec-columns (vs hs / out v)
@@ -7016,8 +7028,8 @@
 ;; √ео €чейки: (ширина секции высота €руса). √раницы секции Ч
 ;; соседние колонки-границы; €рус Ч горизонтали, охватывающие секцию.
 ;; Ѕез осей (полилинии, линейный каркас с “-объединением) Ч свой размер.
-(defun mark:sec-geo-one (bb vs2 hs / x0 y0 x1 y1 cols c face xl xr cov
-                             yb yt h f)
+(defun mark:sec-geo-one (bb vs2 hs / x0 y0 x1 y1 cols c ccols face xl xr
+                             cov yb yt h f)
   (setq x0 (nth 0 bb)
         y0 (nth 1 bb)
         x1 (nth 2 bb)
@@ -7025,9 +7037,18 @@
   (if (or (null vs2) (null hs))
     (list (mark:round1 (- x1 x0)) (mark:round1 (- y1 y0)))
     (progn
+      ;; –ед. 48.11: граница секции Ч колонка, доход€ща€ до €руса €чейки
+      ;; (проверка та же, что L/R в fill-items->cells); короткие торцевые
+      ;; оси ширину подъ€чеек не срезают.
       (setq cols (mark:fill-cluster-items vs2)
+            ccols nil
             xl    nil
             xr    nil)
+      (foreach c cols
+        (if (mark:fill-covers (mark:fill-item-spans c)
+                              y0 y1 (+ *mark:fill-tol* 25.0))
+          (setq ccols (cons c ccols))))
+      (setq cols (reverse ccols))
       (foreach c cols
         (setq face (mark:fill-inner-edge c 1.0))
         (if (and face (<= face (+ x0 1.0))
