@@ -110,7 +110,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.9")
+(setq *mark:rev*    "–ед. 48.10")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -2928,7 +2928,10 @@
 (defun mark:ar-collect (fills / out e obj w h wh hh ins mres mval pa
                              x0 y0 x1 y1 cx cy)
   ;; 1) сбор: геометри€ + W/H теми же ключами, что в ћј– ј–ќ¬ ј«јѕ;
-  ;;    разбор ћарки Ч только подсказка, не фильтр
+  ;;    разбор ћарки Ч только подсказка, не фильтр.
+  ;;    –ед. 48.10: разбор Ч ar-parse2 (литера и подындекс), как в
+  ;;    ar-reindex; ar-parse литер не знал Ч давал ложный WARN
+  ;;    Ђћарка не разобранаї на марках вида Ђ∆.б10.2ї.
   (setq out nil)
   (foreach e fills
     (setq obj  (mark:vla e)
@@ -2943,7 +2946,7 @@
           ins  (cdr (assoc 10 (entget e)))
           mres (mark:find-attr e *mark:attr-mark*)
           mval (if (car mres) (cadr mres) "")
-          pa   (mark:ar-parse mval))
+          pa   (mark:ar-parse2 mval))
     (cond
       ((or (null w) (null h) (<= w 0.0) (<= h 0.0))
        (progn
