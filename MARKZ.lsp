@@ -8176,11 +8176,16 @@
 
 ;; —равнение натуральных ключей: 9 < 10 < 12.1 < 13
 (defun mark:nat-key< (a b / i av bv res)
+  ;; –ед. 48.30 (фикс): инкремент i и эквивалентность равных ключей Ч
+  ;; раньше при равных первых токенах цикл не продвигалс€ (вечное
+  ;; зависание; в старой сортировке ветка была фактически мЄртвой)
   (setq i   0
         res nil)
   (while (and (null res)
               (or (< i (length a)) (< i (length b))))
     (cond
+      ((and (>= i (length a)) (>= i (length b)))
+       (setq res 'eq))
       ((>= i (length a)) (setq res 'lt))
       ((>= i (length b)) (setq res 'gt))
       (t
@@ -8199,7 +8204,8 @@
             ;; разные типы: символ Ђ.ї (46) перед цифровой группой
             (if (= (car av) 0)
               (setq res 'lt)
-              (setq res 'gt)))))))
+              (setq res 'gt))))
+        (setq i (1+ i)))))
   (eq res 'lt))
 
 (defun mark:nat-less (a b)
