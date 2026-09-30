@@ -118,7 +118,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.31")
+(setq *mark:rev*    "Ред. 48.32")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -651,8 +651,10 @@
            *mark:others*       others
            *mark:found-names*  (reverse names))
      ;; Ред. 48.30: новый выбор — карта витражей недействительна
+     ;; Ред. 48.32: и кэш каркаса тоже
      (setq *mark:vz-map*  nil
-           *mark:vz-mode* nil)
+           *mark:vz-mode* nil
+           *mark:carc-cache* nil)
      (mark:out "")
      (mark:out (strcat "[INFO] Выбрано объектов: " (itoa *mark:sel-total*)))
      (mark:out (strcat "[INFO] Заполнений: " (itoa (length *mark:fills*))))
@@ -2382,7 +2384,7 @@
 ;; Подитог по типу (без слова «Подитог») + финальный итог
 (defun mtab:create-table (data / pt doc space tbl row nRows nCols
     rec tip h w mark cnt area oldEcho i n-types
-    cur cnt-sub area-sub n-row)
+    cur cnt-sub area-sub n-row t0)
   (if (null data)
     (progn (mark:out "[INFO] Нет данных для таблицы.") nil)
     (progn
@@ -2406,7 +2408,8 @@
           (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
           (if (not *mark:batch-undo*)
             (mark:ax-invoke-ok doc "StartUndoMark" nil))
-          (setq tbl (vl-catch-all-apply 'vla-AddTable
+          (setq t0  (getvar "MILLISECS")
+                tbl (vl-catch-all-apply 'vla-AddTable
             (list space (vlax-3d-point pt) nRows nCols 10.0 30.0)))
           (if (vl-catch-all-error-p tbl)
             (progn
@@ -2417,6 +2420,12 @@
               (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
               nil)
             (progn
+              ;; Ред. 48.32: подавить пересчёт таблицы на время заполнения
+              ;; (документация Autodesk: RegenerateTableSuppressed — без
+              ;; этого AutoCAD пересоздаёт таблицу на каждом изменении
+              ;; ячейки, ~850 раз для ведомости из 54 позиций)
+              (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+                                  (list tbl :vlax-true))
               ;; ширины колонок: № | Тип | Марка | H | W | Кол-во | Площадь
               ;; Ред. 48.0: таблица ведомости — на слой «Размеры»
               (mark:tbl-layer doc tbl)
@@ -2514,12 +2523,18 @@
               (vla-SetCellAlignment tbl row 5 5)
               (vla-SetCellAlignment tbl row 6 5)
               (vl-catch-all-apply 'vla-SetRowHeight (list tbl row 8.0))
+              (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+                                  (list tbl :vlax-false))
               (vl-catch-all-apply 'vla-Update (list tbl))
               (if (not *mark:batch-undo*)
                 (mark:ax-invoke-ok doc "EndUndoMark" nil))
               (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
-              (mark:out (strcat "[INFO] Таблица создана, строк данных: "
-                                (itoa (length data))))
+              (mark:out
+                (strcat "[INFO] Таблица создана, строк данных: "
+                        (itoa (length data))
+                        " (время: "
+                        (rtos (/ (- (getvar "MILLISECS") t0) 1000.0) 2 2)
+                        " с)"))
               t)))))))
 
 ;; ---------- XML escape / CSV quote ----------
@@ -7830,11 +7845,52 @@
 
 ;; Готовые заполнения без раскладки: попросить каркас и рассчитать
 ;; секции/ярусы на месте (решение заказчика 2026-09-29).
+;; Ред. 48.32: кэш выбора каркаса — ОДИН выбор на все проходы витражей
+;; раздельной маркировки (сбрасывается при новом выборе заполнений).
+(defvar *mark:carc-cache* nil)
+
+;; Ред. 48.32: список enames набора выбора (в порядке выбора)
+(defun mark:ss-list (ss / i out)
+  (setq i   (sslength ss)
+        out nil)
+  (repeat i
+    (setq i   (1- i)
+          out (cons (ssname ss i) out)))
+  out)
+
+;; Ред. 48.32: набор из кэша каркаса (удалённые объекты пропускаем)
+(defun mark:carc-ss (/ s e)
+  (setq s nil)
+  (foreach e *mark:carc-cache*
+    (if (entget e)
+      (if s
+        (ssadd e s)
+        (setq s (ssadd e)))))
+  (if (and s (> (sslength s) 0))
+    s
+    nil))
+
 (defun mark:sec-standalone (/ ss i e ed typ nm r segs blocks msegs rblocks
                                seen polys axes vs hs items boxes bb n-poly
-                               n-polyo n-line vs2 out ins hit cnt glaz)
-  (mark:out "Для расчёта секций выберите каркас рамкой. Enter — отмена.")
-  (setq ss (vl-catch-all-apply 'ssget nil))
+                               n-polyo n-line vs2 out ins hit cnt glaz cs)
+  ;; Ред. 48.32: сначала кэш предыдущего выбора каркаса — следующие
+  ;; проходы витражей не спрашивают рамку заново
+  (setq ss nil)
+  (if *mark:carc-cache*
+    (progn
+      (setq cs (mark:carc-ss))
+      (if cs
+        (progn
+          (mark:out
+            (strcat "[INFO] Каркас: использован предыдущий выбор ("
+                    (itoa (sslength cs)) " объект(ов))."))
+          (setq ss cs)))))
+  (if (null ss)
+    (progn
+      (mark:out "Для расчёта секций выберите каркас рамкой. Enter — отмена.")
+      (setq ss (vl-catch-all-apply 'ssget nil))
+      (if (and ss (not (vl-catch-all-error-p ss)))
+        (setq *mark:carc-cache* (mark:ss-list ss)))))
   (if (or (vl-catch-all-error-p ss) (null ss))
     (progn
       (mark:out "[INFO] Каркас не выбран.")
@@ -7890,8 +7946,12 @@
           ;; Ред. 48.6: незамкнутая полилиния и POLYLINE — не каркас.
           ((member typ '("LWPOLYLINE" "POLYLINE"))
            (setq n-polyo (1+ n-polyo)))))
-      ;; Ред. 48.3: «Атрибуты витража» из выбора каркаса — префикс марок
-      (if glaz
+      ;; Ред. 48.3: «Атрибуты витража» из выбора каркаса — префикс марок.
+      ;; Ред. 48.32: только если префикс ещё не определён — раньше
+      ;; перезапись затирала блок текущего витража (mark:vz-set), и в
+      ;; раздельной маркировке все витражи получали префикс первого
+      ;; по порядку выбора блока (В-7 маркировался как ТБ-1).
+      (if (and glaz (null *mark:glazings*))
         (setq *mark:glazings* (reverse glaz)))
       (setq boxes nil
             vs    nil
