@@ -110,7 +110,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.8")
+(setq *mark:rev*    "–ед. 48.9")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -1404,7 +1404,7 @@
 ;; √руппирует записи по ключу (W,H) с допуском 0.5 мм.
 ;; ¬ группе сравнивает (letter . hnum) Ч базис без суффикса.
 (defun mark:diag-base (/ groups g gg ng key r w h base bases
-                             lines shown total conflicts
+                             lines shown total conflicts qcnt
                              letter hnum suffix
                              kinds kind)
   (mark:out "")
@@ -1432,6 +1432,7 @@
             (setq groups (reverse ng)))
           (setq groups (cons (list key r) groups))))))
   (setq conflicts 0
+        qcnt      0
         lines     nil)
   (foreach g groups
     (setq bases nil
@@ -1448,6 +1449,9 @@
                          (if (mark:rec-get r 'subw)
                            (strcat "." (itoa (mark:rec-get r 'subw)))
                            "")))
+      ;; –ед. 48.9: считаем базисы с Ђ?ї (буква/номер не определены).
+      (if (or (null letter) (null hnum))
+        (setq qcnt (1+ qcnt)))
       (if (not (member base bases))
         (setq bases (cons base bases)))
       (setq kind (if (= suffix "") "обычное" suffix))
@@ -1481,6 +1485,13 @@
         nil)
       (mark:out "[DIAG] ѕричина: разные фактические W/H у блоков")
       (mark:out "        (сверьте ЂЎирина/¬ысота в светуї у конфликтов).")))
+  ;; –ед. 48.9: подсказка Ч что значит Ђ?ї в базисе (только печать).
+  (if (> qcnt 0)
+    (progn
+      (mark:out (strcat "[DIAG] Ђ?ї в базисе: " (itoa qcnt)
+                        " Ч буква €руса или номер секции не определены."))
+      (mark:out "        “аким блокам марки не пишутс€ Ч подробности в TEST 13:")
+      (mark:out "        нет гео секции / нет буквы €руса / нет номера шкалы.")))
   conflicts)
 
 (defun mark:diag-bases-str (bases / out b)
