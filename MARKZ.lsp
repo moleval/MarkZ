@@ -118,7 +118,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.30")
+(setq *mark:rev*    "–ед. 48.31")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -4379,7 +4379,19 @@
                        "  €чеек " (itoa (length (car r)))))
              (if (null (car r))
                (mark:out "[INFO] ћало осей Ч увеличьте *mark:fill-tol*."))
-             (setq boxes (car r)))))
+             ;; –ед. 48.31 (TZ п.40): оси из тех же отрезков Ч секции
+             ;; и “-членени€ линейного каркаса считаютс€ единым
+             ;; механизмом sec-columns / sec-geo-one, как в смешанном
+             ;; пути. Ѕез импостов все вертикали Ч границы, секци€
+             ;; равна своей ширине; вставки не мен€ютс€ (тот же
+             ;; конвейер €чеек mark:fill-segs->cells).
+             (setq boxes (car r)
+                   items (mark:fill-seg-items segs)
+                   vs    (car items)
+                   hs    (cadr items))
+             (mark:out
+               (strcat "[INFO] ќсей: вертикальных " (itoa (length vs))
+                       ", горизонтальных " (itoa (length hs)) ".")))))
         ;; Ѕлочный и смешанный каркас: единый расчЄт осей Ч €чейка может
         ;; быть собрана из блоков и линий (–ед. 47.7); оси нужны и дл€
         ;; секций/€русов (–ед. 48.0).
@@ -7885,9 +7897,14 @@
             vs    nil
             hs    nil)
       (cond
+        ;; –ед. 48.31 (TZ п.40): оси из отрезков Ч секции и
+        ;; “-членени€ линейного каркаса считаютс€ как в смешанном.
         ((null blocks)
          (if segs
-           (setq boxes (car (mark:fill-segs->cells segs)))))
+           (setq boxes (car (mark:fill-segs->cells segs))
+                 items (mark:fill-seg-items segs)
+                 vs    (car items)
+                 hs    (cadr items))))
         (t
          (setq axes  (mark:fill-owned-axes blocks)
                vs    (car axes)
