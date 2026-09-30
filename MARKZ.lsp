@@ -111,7 +111,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.15")
+(setq *mark:rev*    "Ред. 48.16")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -7042,12 +7042,15 @@
       (setq out (cons v out))))
   (reverse out))
 
-;; [DIAG] Разбор секционной геометрии для контрольного прогона:
-;; горизонтали, вертикали (стойка-граница/импост) и анализ концов
-;; границ через sec-end-hit (строго/торец). Включается командой
-;; МАРКАЗАПГЕО, печатается один раз и сбрасывает флаг сама.
-;; Только печать — расчёты не меняет (Ред. 48.14).
-(defun mark:sec-diag (vs hs vs2 / sv sh v h dy n ks)
+;; [DIAG] Компактный разбор секционной геометрии: одна строка на
+;; горизонталь и на вертикаль — статус (стойка-граница/импост),
+;; вердикты sec-end-hit для низа и верха (строго/торец) и прогноз
+;; правила-кандидата «импост = хотя бы один строгий конец» (Ред. 48.16;
+;; в 48.14–48.15 был детальный построчный разбор концов — блок на
+;; 89 вертикалей не копировался из консоли целиком). Включается
+;; командой МАРКАЗАПГЕО, печатается один раз и сбрасывает флаг сама.
+;; Только печать — расчёты не меняет.
+(defun mark:sec-diag (vs hs vs2 / sv sh v h n1 n2 s1 s2 w1 w2 kp ks)
   (setq *mark:sec-diag* nil)
   (mark:out "[DIAG] === Геометрия секций ===")
   (mark:out
@@ -7066,52 +7069,35 @@
   (setq sv nil)
   (foreach v vs
     (setq sv (mark:sec-ins-ax sv v)))
+  (setq kp 0)
   (foreach v sv
+    (setq s1 (mark:sec-end-hit (nth 0 v) (nth 1 v) sh nil)
+          w1 (mark:sec-end-hit (nth 0 v) (nth 1 v) sh t)
+          s2 (mark:sec-end-hit (nth 0 v) (nth 2 v) sh nil)
+          w2 (mark:sec-end-hit (nth 0 v) (nth 2 v) sh t)
+          n1 0
+          n2 0)
+    (foreach h sh
+      (if (<= (abs (- (nth 1 v) (nth 0 h))) 200.0)
+        (setq n1 (1+ n1)))
+      (if (<= (abs (- (nth 2 v) (nth 0 h))) 200.0)
+        (setq n2 (1+ n2))))
+    (if (or s1 s2)
+      (setq kp (1+ kp)))
     (mark:out
       (strcat "[DIAG] верт x=" (rtos (nth 0 v) 2 1)
               " y=" (rtos (nth 1 v) 2 1) ".." (rtos (nth 2 v) 2 1)
               " hw=" (rtos (nth 3 v) 2 0)
-              (if (member v vs2) " граница" " импост")))
-    (if (member v vs2)
-      (progn
-        (setq n 0)
-        (foreach h sh
-          (setq dy (- (nth 1 v) (nth 0 h)))
-          (if (<= (abs dy) 200.0)
-            (progn
-              (setq n (1+ n))
-              (mark:out
-                (strcat "[DIAG]   низ y=" (rtos (nth 1 v) 2 1)
-                        ": гор y=" (rtos (nth 0 h) 2 1)
-                        " x=" (rtos (nth 1 h) 2 1) ".." (rtos (nth 2 h) 2 1)
-                        " dy=" (rtos dy 2 1)
-                        (if (mark:sec-end-hit (nth 0 v) (nth 1 v) sh nil)
-                          " строго=ДА" " строго=НЕТ")
-                        (if (mark:sec-end-hit (nth 0 v) (nth 1 v) sh t)
-                          " торец=ДА" " торец=НЕТ"))))))
-        (if (= n 0)
-          (mark:out
-            (strcat "[DIAG]   низ y=" (rtos (nth 1 v) 2 1)
-                    ": нет горизонталей в +/-200")))
-        (setq n 0)
-        (foreach h sh
-          (setq dy (- (nth 2 v) (nth 0 h)))
-          (if (<= (abs dy) 200.0)
-            (progn
-              (setq n (1+ n))
-              (mark:out
-                (strcat "[DIAG]   верх y=" (rtos (nth 2 v) 2 1)
-                        ": гор y=" (rtos (nth 0 h) 2 1)
-                        " x=" (rtos (nth 1 h) 2 1) ".." (rtos (nth 2 h) 2 1)
-                        " dy=" (rtos dy 2 1)
-                        (if (mark:sec-end-hit (nth 0 v) (nth 2 v) sh nil)
-                          " строго=ДА" " строго=НЕТ")
-                        (if (mark:sec-end-hit (nth 0 v) (nth 2 v) sh t)
-                          " торец=ДА" " торец=НЕТ"))))))
-        (if (= n 0)
-          (mark:out
-            (strcat "[DIAG]   верх y=" (rtos (nth 2 v) 2 1)
-                    ": нет горизонталей в +/-200"))))))
+              (if (member v vs2) " граница" " импост")
+              " | низ[" (itoa n1) "] С=" (if s1 "ДА" "НЕТ")
+              " Т=" (if w1 "ДА" "НЕТ")
+              " | верх[" (itoa n2) "] С=" (if s2 "ДА" "НЕТ")
+              " Т=" (if w2 "ДА" "НЕТ")
+              " | прогноз: " (if (or s1 s2) "импост" "граница"))))
+  (mark:out
+    (strcat "[DIAG] Прогноз правила «импост = хотя бы один строгий конец»: "
+            "импостов " (itoa kp)
+            ", границ " (itoa (- (length vs) kp)) "."))
   (setq ks "")
   (foreach h *mark:scale1*
     (setq ks (strcat ks " " (itoa h))))
