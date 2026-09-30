@@ -111,7 +111,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.26")
+(setq *mark:rev*    "Ред. 48.27")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -2831,15 +2831,17 @@
         (mark:out "[ERROR] Нет данных (проверьте размеры блоков).")
         (progn
           (mark:out (strcat "[INFO] Уникальных позиций: " (itoa (length data))))
-          (initget "Y N")
+          ;; Ред. 48.27: русские ключи — ввод «Да»/«Нет» (или по
+          ;; первой букве Д/Н); Y/N и Enter работают как раньше
+          (initget "Да Нет Y N")
           (setq do-table
-            (getkword "\nСоздать таблицу AutoCAD? [Да(Y)/Нет(N)] <Y>: "))
-          (if (or (null do-table) (= do-table "Y"))
+            (getkword "\nСоздать таблицу AutoCAD? [Да(Y)/Нет(N)] <Да>: "))
+          (if (or (null do-table) (member do-table '("Y" "Да")))
             (setq do-table t) (setq do-table nil))
-          (initget "Y N")
+          (initget "Да Нет Y N")
           (setq do-xls
-            (getkword "\nЭкспорт в XLS? [Да(Y)/Нет(N)] <Y>: "))
-          (if (or (null do-xls) (= do-xls "Y"))
+            (getkword "\nЭкспорт в XLS? [Да(Y)/Нет(N)] <Да>: "))
+          (if (or (null do-xls) (member do-xls '("Y" "Да")))
             (setq do-xls t) (setq do-xls nil))
           (setq base
             (strcat (getvar "dwgprefix")
