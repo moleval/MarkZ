@@ -111,7 +111,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.17")
+(setq *mark:rev*    "Ред. 48.18")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -7580,7 +7580,7 @@
 ;; TEST 16: таблицы секций и ярусов (ТЗ 3.0, §7.1)
 (defun mark:test-16 (/ rows lines r n row q size src subs cnt div k sw-cnt
                         lrows llines letter lsize lsubs lhidx sh-cnt ln
-                        wkeys wk sw hkeys hk sl)
+                        wkeys wk sw hkeys hk sl used empty sc i)
   (mark:out "")
   (mark:out "[TEST 16] Секции и ярусы")
   (setq rows nil)
@@ -7650,6 +7650,26 @@
       (mark:out "  №   W      источник  подъячейки")
       (foreach ln (reverse lines)
         (mark:out ln))))
+  ;; Ред. 48.18: номера шкалы, у которых нет своего столбца —
+  ;; ширина встречается только как подъячейка или Р-длина
+  ;; (ТБ-1: №1 (450) — зеркало MarkZV, видимые столбцы с №2;
+  ;; В-7: №3 (650), №4 (660), №5 (750), №9 (1000) — подъячейки).
+  ;; Только печать, нумерация не меняется.
+  (setq used  nil
+        empty nil
+        i     0)
+  (foreach row rows
+    (setq used (cons (nth 0 row) used)))
+  (foreach sc *mark:scale-final*
+    (setq i (1+ i))
+    (if (not (member i used))
+      (setq empty (cons (strcat "№" (itoa i)
+                                " (" (mark:fmt-raw (nth 0 sc)) ")")
+                        empty))))
+  (if empty
+    (mark:out
+      (strcat "[INFO] Номера шкалы без столбца: "
+              (mark:sec-join (reverse empty)))))
   ;; ярусы: группировка по букве
   (setq lrows nil)
   (foreach r *mark:records*
