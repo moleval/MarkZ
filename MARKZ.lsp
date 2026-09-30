@@ -111,7 +111,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.27")
+(setq *mark:rev*    "–ед. 48.28")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -3344,8 +3344,29 @@
   (setq e (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
   (if (vl-catch-all-error-p e) nil e))
 
+;; –ед. 48.28: префикс витража дл€ имени группы р€довки Ч без
+;; лога. ¬ ћј– ј«јѕ уже вычислен (ћј– ј–ќ¬ ј«јѕ, TEST 02/03); в
+;; одиночном ћј– ј«јѕ–яƒ Ч тихо из Ђјтрибутов витражаї выделени€.
+(defun mark:ar-prefix (/ g res)
+  (cond
+    (*mark:prefix-found* *mark:prefix*)
+    (*mark:glazings*
+     (progn
+       (setq g   (car *mark:glazings*)
+             res (mark:find-attr g *mark:attr-vitrage*))
+       (if (and (car res) (mark:strp (cadr res)))
+         (mark:trim (cadr res))
+         "")))
+    (t "")))
+
 ;; √руппа AutoCAD по списку enames; nil при <1 объекта
-(defun mark:ar-make-group (name enames / doc groups old grp arr i n)
+;; –ед. 48.28: существующую группу Ќ≈ удал€ем и Ќ≈ пересоздаЄм Ч
+;; новые вставки добавл€ютс€ в неЄ (AppendItems): группировка
+;; старых р€довок сохран€етс€. »м€ вызов даЄт с суффиксом витража
+;; (Ђ–€довка горизонтальна€ ¬-7ї), поэтому прогоны разных витражей
+;; друг другу не мешают; legacy-группы без суффикса (созданы до
+;; 48.28) не трогаютс€ вовсе.
+(defun mark:ar-make-group (name enames / doc groups old grp arr i n cnt)
   (if (and enames (> (length enames) 1))
     (progn
       (setq doc    (mark:ax-get (vlax-get-acad-object) "ActiveDocument")
@@ -3353,11 +3374,11 @@
       (if (null groups)
         (mark:out "[WARN] Groups недоступны.")
         (progn
-          ;; удалить одноимЄнную группу
-          (setq old (mark:ax-invoke groups "Item" name))
-          (if old
-            (vl-catch-all-apply 'vla-Delete (list old)))
-          (setq grp (vl-catch-all-apply 'vla-Add (list groups name)))
+          ;; существующа€ группа Ч добавить в неЄ, не пересоздавать
+          (setq old (mark:ax-invoke groups "Item" name)
+                grp (if old
+                      old
+                      (vl-catch-all-apply 'vla-Add (list groups name))))
           (cond
             ((vl-catch-all-error-p grp)
              (mark:out (strcat "[WARN] √руппа \"" name "\": "
@@ -3374,11 +3395,23 @@
                  (vlax-safearray-put-element arr i
                    (vlax-ename->vla-object e))
                  (setq i (1+ i)))
-               (vl-catch-all-apply 'vlax-invoke-method
-                 (list grp "AppendItems" arr))
-               (mark:out
-                 (strcat "[INFO] √руппа \"" name "\": "
-                         (itoa n) " объект(ов)")))))))))
+               (if (vl-catch-all-error-p
+                     (vl-catch-all-apply 'vlax-invoke-method
+                       (list grp "AppendItems" arr)))
+                 (mark:out
+                   (strcat "[WARN] √руппа \"" name
+                           "\": объекты не добавлены.")))
+               (setq cnt (mark:ax-get grp "Count"))
+               (if (not (numberp cnt))
+                 (setq cnt n))
+               (if old
+                 (mark:out
+                   (strcat "[INFO] √руппа \"" name "\": добавлено "
+                           (itoa n) ", всего " (itoa cnt)
+                           " объект(ов)"))
+                 (mark:out
+                   (strcat "[INFO] √руппа \"" name "\": "
+                           (itoa cnt) " объект(ов)"))))))))))
   nil)
 
 ;;;--- ќсновной проход ---------------------------------------------------
@@ -3389,7 +3422,8 @@
                      x y w h obj keysW keysH
                      cnt-h cnt-v y0 x1
                      h-ents v-ents he ve
-                     h-items v-items pl)
+                     h-items v-items pl
+                     ar-pfx ar-gh ar-gv)
   (mark:cmd-line
     "ћј– ј«јѕ–яƒ Ч р€довка из блоков Ђ–€д заполненийї: номера снизу, буквы справа.")
   (mark:reset-state)
@@ -3439,7 +3473,10 @@
                      cnt-h  0
                      cnt-v  0
                      h-ents nil
-                     v-ents nil)
+                     v-ents nil
+                     ar-pfx nil
+                     ar-gh  nil
+                     ar-gv  nil)
 
                (if (null space)
                  (progn
@@ -3557,9 +3594,18 @@
                              (setq placed (cons (list x y) placed)
                                    cnt-v  (1+ cnt-v)))))))
 
-                   ;; группы: горизонталь и вертикаль раздельно
-                   (mark:ar-make-group *mark:ar-group-h* h-ents)
-                   (mark:ar-make-group *mark:ar-group-v* v-ents)
+                   ;; группы: горизонталь и вертикаль раздельно;
+                   ;; –ед. 48.28: им€ с суффиксом витража Ч прогоны
+                   ;; разных витражей не расформировывают чужие группы
+                   (setq ar-pfx (mark:ar-prefix)
+                         ar-gh  (if (and (mark:strp ar-pfx) (/= ar-pfx ""))
+                                  (strcat *mark:ar-group-h* " " ar-pfx)
+                                  *mark:ar-group-h*)
+                         ar-gv  (if (and (mark:strp ar-pfx) (/= ar-pfx ""))
+                                  (strcat *mark:ar-group-v* " " ar-pfx)
+                                  *mark:ar-group-v*))
+                   (mark:ar-make-group ar-gh h-ents)
+                   (mark:ar-make-group ar-gv v-ents)
 
                    (if (and doc (not *mark:batch-undo*))
                      (mark:ax-invoke-ok doc "EndUndoMark" nil))
