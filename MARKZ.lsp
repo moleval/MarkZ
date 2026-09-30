@@ -110,7 +110,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.11")
+(setq *mark:rev*    "Ред. 48.12")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -5688,6 +5688,18 @@
         (t nil))
       segs)))
 
+;; Русские имена типов для строки "[INFO] Типы:" (Ред. 48.12);
+;; незнакомый тип выводится как есть, латиницей.
+(defun mark:type-ru (typ)
+  (cond
+    ((member typ '("LWPOLYLINE" "POLYLINE")) "полилинии")
+    ((= typ "INSERT") "блоки")
+    ((= typ "MLINE") "мультилинии")
+    ((= typ "LINE") "отрезки")
+    ((= typ "ARC") "дуги")
+    ((= typ "CIRCLE") "окружности")
+    (t typ)))
+
 (defun mark:fill-type-stat (ss / i e ed typ acc pair out first piece)
   (setq acc nil
         i   (if ss (sslength ss) 0))
@@ -5703,7 +5715,7 @@
   (setq out   nil
         first t)
   (foreach pair (reverse acc)
-    (setq piece (strcat (car pair) "=" (itoa (cdr pair))))
+    (setq piece (strcat (mark:type-ru (car pair)) "=" (itoa (cdr pair))))
     (if first
       (progn
         (setq first nil
@@ -7012,9 +7024,9 @@
 ;; mk:split-tjoints MarkZV; Ред. 48.11: Т-членения — ствол в торец
 ;; укороченной горизонтали). Оба конца только у торцов — колонка.
 (defun mark:sec-impost? (v hs)
-  (or (and (mark:sec-end-hit (nth 0 v) (nth 1 v) hs)
+  (or (and (mark:sec-end-hit (nth 0 v) (nth 1 v) hs nil)
            (mark:sec-end-hit (nth 0 v) (nth 2 v) hs t))
-      (and (mark:sec-end-hit (nth 0 v) (nth 2 v) hs)
+      (and (mark:sec-end-hit (nth 0 v) (nth 2 v) hs nil)
            (mark:sec-end-hit (nth 0 v) (nth 1 v) hs t))))
 
 ;; Колонки-границы секций: неимпостные вертикальные элементы
