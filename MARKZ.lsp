@@ -95,6 +95,9 @@
 (setq *mark:ar-gap*     1000.0)
 (setq *mark:ar-line*    150.0)   ; шаг линий 1+, мм
 (setq *mark:ar-tol*     1.0)
+;; –ед. 48.29: порог разрыва между витражами, мм Ч меньше порога
+;; один витраж (проЄмные €чейки не разрывают); у “Ѕ-1/¬-7 ~9.9 м
+(setq *mark:vz-gap*     2500.0)
 
 ;; —етка заполнений
 (setq *mark:fill-tol*    30.0)    ; мм Ч выравнивание осей
@@ -111,7 +114,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.28")
+(setq *mark:rev*    "–ед. 48.29")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -2210,19 +2213,38 @@
        t))))))
 
 ;; ѕрефикс ¬итраж (как в MARKZ)
-(defun mtab:prefix (/ g res val)
+(defun mtab:prefix (/ g res val names)
   (setq *mark:prefix* ""
-        *mark:prefix-found* nil)
+        *mark:prefix-found* nil
+        names               nil)
   (if *mark:glazings*
     (progn
-      (setq g (car *mark:glazings*)
-            res (mark:find-attr g *mark:attr-vitrage*))
-      (if (and (car res) (mark:strp (cadr res)) (/= (mark:trim (cadr res)) ""))
+      ;; –ед. 48.29: несколько витражей Ч перечень в лог (ведомость
+      ;; одна на всех); *mark:prefix* Ч первый (марки уже с префиксами)
+      (if (> (length *mark:glazings*) 1)
         (progn
-          (setq *mark:prefix* (mark:trim (cadr res))
-                *mark:prefix-found* t)
-          (mark:out (strcat "[INFO] ¬итраж: " *mark:prefix*)))
-        (mark:out "[INFO] јтрибут \"¬итраж\" пуст Ч без префикса.")))
+          (foreach g *mark:glazings*
+            (setq res (mark:find-attr g *mark:attr-vitrage*))
+            (if (and (car res) (mark:strp (cadr res))
+                     (/= (mark:trim (cadr res)) ""))
+              (setq names (cons (mark:trim (cadr res)) names))))
+          (setq names (reverse names))
+          (if names
+            (progn
+              (setq *mark:prefix*       (car names)
+                    *mark:prefix-found* t)
+              (mark:out
+                (strcat "[INFO] ¬итражи: " (mark:vz-join names ", "))))
+            (mark:out "[INFO] јтрибут \"¬итраж\" пуст Ч без префикса.")))
+        (progn
+          (setq g   (car *mark:glazings*)
+                res (mark:find-attr g *mark:attr-vitrage*))
+          (if (and (car res) (mark:strp (cadr res)) (/= (mark:trim (cadr res)) ""))
+            (progn
+              (setq *mark:prefix* (mark:trim (cadr res))
+                    *mark:prefix-found* t)
+              (mark:out (strcat "[INFO] ¬итраж: " *mark:prefix*)))
+            (mark:out "[INFO] јтрибут \"¬итраж\" пуст Ч без префикса.")))))
     (mark:out "[INFO] \"јтрибуты витража\" нет Ч без префикса."))
   *mark:prefix*)
 
@@ -6920,6 +6942,254 @@
   (mark:fill-highlight-partial)
   (setq *mark:fills* ins-list)
   (princ))
+;;;=====================================================================
+;;;  –ед. 48.29: Ќ≈— ќЋ№ ќ ¬»“–ј∆≈… ¬ ќƒЌќћ ѕ–ќ√ќЌ≈ (ћј– ј«јѕ)
+;;;   ластеризаци€ заполнений по св€зности: зазор между пр€моугольниками
+;;;  меньше *mark:vz-gap* Ч один витраж (проЄмные €чейки не разрывают).
+;;;  Ѕлоки Ђјтрибуты витражаї прив€зываютс€ к ближайшему кластеру; при
+;;;  двух и более в кластере Ч WARN, берЄтс€ ближайший к центру.
+;;;  ¬итраж без блока Ч марки без префикса (TEST 02 NOT FOUND).
+;;;  ќдин кластер Ч поведение и лог побайтово как раньше (48.28).
+;;;=====================================================================
+
+;; —в€заны ли пр€моугольники (зазор меньше порога по ќЅ≈»ћ ос€м)
+(defun mark:vz-near? (a b / ax0 ay0 ax1 ay1 bx0 by0 bx1 by1 dx dy)
+  (setq ax0 (nth 0 a) ay0 (nth 1 a) ax1 (nth 2 a) ay1 (nth 3 a)
+        bx0 (nth 0 b) by0 (nth 1 b) bx1 (nth 2 b) by1 (nth 3 b)
+        dx  (max 0.0 (- (max ax0 bx0) (min ax1 bx1)))
+        dy  (max 0.0 (- (max ay0 by0) (min ay1 by1))))
+  (and (< dx *mark:vz-gap*) (< dy *mark:vz-gap*)))
+
+(defun mark:vz-remove-list (lst del / out)
+  (setq out nil)
+  (foreach x lst
+    (if (not (member x del))
+      (setq out (cons x out))))
+  (reverse out))
+
+;; ћинимальный X кластера Ч пор€док витражей Ђслева направої
+(defun mark:vz-minx (cluster / m bb x)
+  (setq m nil)
+  (foreach e cluster
+    (setq bb (mark:fill-e-bb e))
+    (if bb
+      (progn
+        (setq x (float (nth 0 bb)))
+        (if (or (null m) (< x m))
+          (setq m x)))))
+  (if m m 1.0e12))
+
+;;  ластеры заполнений: св€зные компоненты bbox, слева направо
+(defun mark:vz-clusters (fills / bbs nobb rest cur queue e0 bb0 hit out e bb r)
+  (setq bbs  nil
+        nobb nil)
+  (foreach e fills
+    (setq bb (mark:fill-e-bb e))
+    (if bb
+      (setq bbs (cons (cons e bb) bbs))
+      (setq nobb (cons e nobb))))
+  (setq out  nil
+        rest bbs)
+  (while rest
+    (setq cur   (list (car rest))
+          rest  (cdr rest)
+          queue cur)
+    (while queue
+      (setq e0    (car queue)
+            queue (cdr queue)
+            bb0   (cdr (assoc e0 bbs))
+            hit   nil)
+      (foreach r rest
+        (if (mark:vz-near? bb0 (cdr r))
+          (setq hit (cons r hit))))
+      (foreach h hit
+        (setq cur (cons h cur)))
+      (setq rest  (mark:vz-remove-list rest hit)
+            queue (append queue hit)))
+    (setq out (cons (mapcar 'car cur) out)))
+  ;; без bbox Ч отдельные кластеры в конец
+  (foreach e nobb
+    (setq out (cons (list e) out)))
+  (vl-sort out
+    '(lambda (a b) (< (mark:vz-minx a) (mark:vz-minx b)))))
+
+;; –ассто€ние точки до пр€моугольника (0 Ч точка внутри)
+(defun mark:vz-dist (pt bb / dx dy)
+  (setq dx (max 0.0 (- (nth 0 bb) (car pt)) (- (car pt) (nth 2 bb)))
+        dy (max 0.0 (- (nth 1 bb) (cadr pt)) (- (cadr pt) (nth 3 bb))))
+  (sqrt (+ (* dx dx) (* dy dy))))
+
+;; ќбъединЄнный bbox кластера
+(defun mark:vz-cbb (cluster / x0 y0 x1 y1 bb e f)
+  (setq x0 nil y0 nil x1 nil y1 nil f nil)
+  (foreach e cluster
+    (setq bb (mark:fill-e-bb e))
+    (if bb
+      (progn
+        (if (or (null x0) (< (nth 0 bb) x0)) (setq x0 (nth 0 bb)))
+        (if (or (null y0) (< (nth 1 bb) y0)) (setq y0 (nth 1 bb)))
+        (if (or (null x1) (> (nth 2 bb) x1)) (setq x1 (nth 2 bb)))
+        (if (or (null y1) (> (nth 3 bb) y1)) (setq y1 (nth 3 bb)))
+        (setq f t))))
+  (if f (list x0 y0 x1 y1) (list 0.0 0.0 0.0 0.0)))
+
+;; Ѕлижайший к центру пр€моугольника блок
+(defun mark:vz-nearest (blks cbb / cx cy best bd d pt)
+  (setq cx (/ (+ (nth 0 cbb) (nth 2 cbb)) 2.0)
+        cy (/ (+ (nth 1 cbb) (nth 3 cbb)) 2.0)
+        best nil
+        bd   nil)
+  (foreach b blks
+    (setq pt (cdr (assoc 10 (entget b))))
+    (if pt
+      (progn
+        (setq d (distance (list cx cy 0.0)
+                          (list (float (car pt)) (float (cadr pt)) 0.0)))
+        (if (or (null bd) (< d bd))
+          (setq bd d best b)))))
+  (if best best (car blks)))
+
+(defun mark:vz-replace (lst old new / out)
+  (setq out nil)
+  (foreach x lst
+    (setq out (cons (if (equal x old) new x) out)))
+  (reverse out))
+
+(defun mark:vz-join (lst sep / out)
+  (setq out nil)
+  (foreach x lst
+    (setq out (if out (strcat out sep x) x)))
+  out)
+
+;; »м€ витража дл€ шапки блока лога
+(defun mark:vz-title (blocks / g res)
+  (cond
+    ((null blocks) "без блока \"јтрибуты витража\"")
+    (t
+     (progn
+       (setq g   (car blocks)
+             res (mark:find-attr g *mark:attr-vitrage*))
+       (if (and (car res) (mark:strp (cadr res)) (/= (mark:trim (cadr res)) ""))
+         (mark:trim (cadr res))
+         "\"јтрибуты витража\" без значени€")))))
+
+;; ѕодмена состо€ни€ под кластер: fills, glazings, префикс, fill-geo
+(defun mark:vz-set (c ageo / out)
+  (setq *mark:fills*        (car c)
+        *mark:glazings*     (cadr c)
+        *mark:prefix*       ""
+        *mark:prefix-found* nil
+        out                 nil)
+  (foreach rec ageo
+    (if (member (car rec) (car c))
+      (setq out (cons rec out))))
+  (setq *mark:fill-geo* (reverse out)))
+
+;;  ластеры + прив€зка блоков Ђјтрибуты витражаї.
+;; ¬озвращает ((fills blocks) ...), слева направо.
+(defun mark:vz-split (fills glazings / cls res g pt d best bd r blks out)
+  (setq cls (mark:vz-clusters fills)
+        res nil)
+  (foreach c cls
+    (setq res (cons (list c nil) res)))
+  (setq res (reverse res))
+  (foreach g glazings
+    (setq pt (cdr (assoc 10 (entget g))))
+    (if pt
+      (progn
+        (setq best nil
+              bd   nil)
+        (foreach r res
+          (setq d (mark:vz-dist pt (mark:vz-cbb (car r))))
+          (if (or (null bd) (< d bd))
+            (setq bd d best r)))
+        (if best
+          (setq res (mark:vz-replace res best
+                      (list (car best) (append (cadr best) (list g)))))))))
+  (setq out nil)
+  (foreach r res
+    (setq blks (cadr r))
+    (cond
+      ((null blks)
+       (setq out (cons (list (car r) nil) out)))
+      ((= (length blks) 1)
+       (setq out (cons (list (car r) blks) out)))
+      (t
+       (progn
+         (mark:out
+           (strcat "[WARN] ¬итраж: " (itoa (length blks))
+                   " блока \"јтрибуты витража\" Ч вз€т ближайший к центру."))
+         (mark:note-warning)
+         (setq out
+           (cons (list (car r)
+                       (list (mark:vz-nearest blks (mark:vz-cbb (car r)))))
+                 out))))))
+  (reverse out))
+
+;; Ётап ћј– ј–ќ¬ ј«јѕ по витражам: один кластер Ч как раньше
+;; (лог прежний); несколько Ч полный блок диагностики per витраж
+(defun mark:vz-marks (/ af ag ageo cls n i c was-reuse)
+  (if (and (not *mark:reuse-sel*) (null *mark:fills*))
+    (mark:select))
+  (if *mark:fills*
+    (progn
+      (setq af   *mark:fills*
+            ag   *mark:glazings*
+            ageo *mark:fill-geo*
+            cls  (mark:vz-split af ag)
+            n    (length cls)
+            i    0)
+      (setq was-reuse       *mark:reuse-sel*
+            *mark:reuse-sel* t)
+      (if (= n 1)
+        (mark:main)
+        (progn
+          (mark:out "")
+          (mark:out
+            (strcat "[INFO] ¬итражей в выборе: " (itoa n)))
+          (foreach c cls
+            (setq i (1+ i))
+            (mark:out "")
+            (mark:out
+              (strcat "--- ¬итраж " (itoa i) " из " (itoa n) ": "
+                      (mark:vz-title (cadr c))
+                      " Ч заполнений " (itoa (length (car c))) " ---"))
+            (mark:vz-set c ageo)
+            (mark:main))))
+      (setq *mark:reuse-sel* was-reuse
+            *mark:fills*     af
+            *mark:glazings*  ag
+            *mark:fill-geo*  ageo))))
+
+;; Ётап ћј– ј«јѕ–яƒ по витражам: каждому Ч свои базы р€довки
+;; (Y снизу и X справа своего габарита) и сво€ группа
+(defun mark:vz-rows (/ af ag ageo cls n i c)
+  (if *mark:fills*
+    (progn
+      (setq af   *mark:fills*
+            ag   *mark:glazings*
+            ageo *mark:fill-geo*
+            cls  (mark:vz-split af ag)
+            n    (length cls)
+            i    0)
+      (if (= n 1)
+        (mark:ar-main)
+        (progn
+          (mark:out "")
+          (mark:out
+            (strcat "[INFO] ¬итражей в выборе: " (itoa n)))
+          (foreach c cls
+            (setq i (1+ i))
+            (mark:out "")
+            (mark:out
+              (strcat "--- ¬итраж " (itoa i) " из " (itoa n) ": "
+                      (mark:vz-title (cadr c)) " ---"))
+            (mark:vz-set c ageo)
+            (mark:ar-main))))
+      (setq *mark:fills*    af
+            *mark:glazings* ag
+            *mark:fill-geo* ageo))))
+
 ;; –ед. 48.26: этап ведомости в ћј– ј«јѕ Ч устойчив к Esc.
 ;; √руппировка р€довок выполн€етс€ раньше Ч на этапе ћј– ј«јѕ–яƒ
 ;; (mark:ar-make-group в конце mark:ar-main), до ведомости. Ќо Esc
@@ -6972,10 +7242,10 @@
                     *mark:sel-total* (length new-fills))
               ;; ћј– ј–ќ¬ ј«јѕ
               (mark:out "[Ё“јѕ 2/4] ћј– ј–ќ¬ ј«јѕ Ч маркировка заполнений...")
-              (mark:main)
+              (mark:vz-marks)
               ;; ћј– ј«јѕ–яƒ
               (mark:out "[Ё“јѕ 3/4] ћј– ј«јѕ–яƒ Ч расстановка р€довки...")
-              (mark:ar-main)
+              (mark:vz-rows)
               ;; ћј– ј«јѕ“јЅЋ
               (mark:out "[Ё“јѕ 4/4] ћј– ј«јѕ“јЅЋ Ч ведомость заполнени€...")
               (mark:a-table-stage))))))
@@ -6983,12 +7253,12 @@
       ;; ¬ј–»јЌ“ 2: »« √ќ“ќ¬џ’ ЅЋќ ќ¬ (ћј– ј–ќ¬ ј«јѕ -> ћј– ј«јѕ–яƒ -> ћј– ј«јѕ“јЅЋ)
       (mark:out "[Ё“јѕ 1/3] ћј– ј–ќ¬ ј«јѕ Ч маркировка готовых блоков...")
       (setq *mark:reuse-sel* nil)
-      (mark:main)
+      (mark:vz-marks)
       (if *mark:fills*
         (progn
           (setq *mark:reuse-sel* t)
           (mark:out "[Ё“јѕ 2/3] ћј– ј«јѕ–яƒ Ч расстановка р€довки...")
-          (mark:ar-main)
+          (mark:vz-rows)
           (mark:out "[Ё“јѕ 3/3] ћј– ј«јѕ“јЅЋ Ч ведомость заполнени€...")
           (mark:a-table-stage))
         (mark:out "[INFO] Ќет заполнений дл€ обработки Ч пакет прерван."))))
