@@ -111,7 +111,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.20")
+(setq *mark:rev*    "–ед. 48.21")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -7832,7 +7832,11 @@
 ;; –ед. 48.20: индекс = номер фактического столбца (сплошна€
 ;; шкала номеров). –-длины шкалы осей без столбца Ч в конце
 ;; файла с индексом Ђ-ї и источником Ђ–ї.
-(defun mark:scale-write-file (/ path f row i w src rest)
+;; –ед. 48.21: шкала столбцов собираетс€ Ћќ јЋ№Ќќ из fill-geo Ч
+;; *mark:widths* к этому моменту перезаписан mark:ar-reindex
+;; строками обозначений (Ђ1ї Е Ђ9.1ї), читать его как числа
+;; нельз€ (поломка 48.20: numberp "9.1").
+(defun mark:scale-write-file (/ path f row i w src rest ws)
   (if *mark:scale-final*
     (progn
       (setq path (strcat (getvar "dwgprefix")
@@ -7842,8 +7846,13 @@
       (if f
         (progn
           (write-line "индекс;размер_мм;источник" f)
+          (setq ws nil)
+          (foreach geo *mark:fill-geo*
+            (if (and (cdr geo) (numberp (cadr geo)))
+              (setq ws (cons (float (mark:sec-key (cadr geo))) ws))))
+          (setq ws (mark:sort-unique (mark:positives ws)))
           (setq i 0)
-          (foreach w *mark:widths*
+          (foreach w ws
             (setq i   (1+ i)
                   src (mark:sec-src-of w))
             (write-line
@@ -7853,7 +7862,7 @@
               f))
           (setq rest nil)
           (foreach row *mark:scale-final*
-            (if (null (mark:index-of *mark:widths* (nth 0 row)))
+            (if (null (mark:index-of ws (nth 0 row)))
               (setq rest (cons row rest))))
           (foreach row (reverse rest)
             (write-line
