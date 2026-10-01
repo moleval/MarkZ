@@ -4233,8 +4233,8 @@
       ;; режим каркаса спрашиваем один раз на весь пакет
       (initget "Блоки Мультилинии Все-типы B M A")
       (setq *mk:batch-mode*
-        (getkword "\nРежим сбора каркаса [Блоки/Мультилинии/Все-типы] <Блоки>: "))
-      (if (null *mk:batch-mode*) (setq *mk:batch-mode* "Блоки"))
+        (getkword "\nРежим сбора каркаса [Блоки/Мультилинии/Все-типы] <Все-типы>: "))
+      (if (null *mk:batch-mode*) (setq *mk:batch-mode* "Все-типы"))
       (setq *mk:batch-mode* (mk:norm-mode *mk:batch-mode*))
       ;; судьба сетки
       (initget "Да Нет")
