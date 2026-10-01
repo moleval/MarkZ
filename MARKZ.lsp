@@ -118,7 +118,7 @@
 ;;;--------------------- Состояние сеанса -----------------------------
 
 ;; Редакция модуля — видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "Ред. 48.32")
+(setq *mark:rev*    "Ред. 48.33")
 
 ;; МАРКАЗАП: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -2384,7 +2384,7 @@
 ;; Подитог по типу (без слова «Подитог») + финальный итог
 (defun mtab:create-table (data / pt doc space tbl row nRows nCols
     rec tip h w mark cnt area oldEcho i n-types
-    cur cnt-sub area-sub n-row t0)
+    cur cnt-sub area-sub n-row t0 t1 t2 t3)
   (if (null data)
     (progn (mark:out "[INFO] Нет данных для таблицы.") nil)
     (progn
@@ -2426,6 +2426,8 @@
               ;; ячейки, ~850 раз для ведомости из 54 позиций)
               (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
                                   (list tbl :vlax-true))
+              ;; Ред. 48.33: замер этапов (создание / заполнение / сборка)
+              (setq t1 (getvar "MILLISECS"))
               ;; ширины колонок: № | Тип | Марка | H | W | Кол-во | Площадь
               ;; Ред. 48.0: таблица ведомости — на слой «Размеры»
               (mark:tbl-layer doc tbl)
@@ -2523,9 +2525,11 @@
               (vla-SetCellAlignment tbl row 5 5)
               (vla-SetCellAlignment tbl row 6 5)
               (vl-catch-all-apply 'vla-SetRowHeight (list tbl row 8.0))
+              (setq t2 (getvar "MILLISECS"))
               (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
                                   (list tbl :vlax-false))
               (vl-catch-all-apply 'vla-Update (list tbl))
+              (setq t3 (getvar "MILLISECS"))
               (if (not *mark:batch-undo*)
                 (mark:ax-invoke-ok doc "EndUndoMark" nil))
               (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
@@ -2533,8 +2537,14 @@
                 (strcat "[INFO] Таблица создана, строк данных: "
                         (itoa (length data))
                         " (время: "
-                        (rtos (/ (- (getvar "MILLISECS") t0) 1000.0) 2 2)
-                        " с)"))
+                        (rtos (/ (- t3 t0) 1000.0) 2 2)
+                        " с: создание "
+                        (rtos (/ (- t1 t0) 1000.0) 2 2)
+                        ", заполнение "
+                        (rtos (/ (- t2 t1) 1000.0) 2 2)
+                        ", сборка "
+                        (rtos (/ (- t3 t2) 1000.0) 2 2)
+                        ")"))
               t)))))))
 
 ;; ---------- XML escape / CSV quote ----------
