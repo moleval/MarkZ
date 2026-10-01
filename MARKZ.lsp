@@ -118,7 +118,7 @@
 ;;;--------------------- —осто€ние сеанса -----------------------------
 
 ;; –едакци€ модул€ Ч видно в консоли при загрузке и в баннерах
-(setq *mark:rev*    "–ед. 48.33")
+(setq *mark:rev*    "–ед. 48.34")
 
 ;; ћј– ј«јѕ: один выбор; один UNDO на весь пакет
 (setq *mark:reuse-sel* nil)
@@ -2526,9 +2526,14 @@
               (vla-SetCellAlignment tbl row 6 5)
               (vl-catch-all-apply 'vla-SetRowHeight (list tbl row 8.0))
               (setq t2 (getvar "MILLISECS"))
+              ;; –ед. 48.34: vla-Update убран Ч включение регенерации
+              ;; (:vlax-false) само пересобирает таблицовый блок
+              ;; (официальный пример Autodesk его не вызывает), а Update
+              ;; следом запускал пересчЄт повторно Ч двойна€ Ђсборкаї.
+              ;; ќткат при проблемах с отображением: вернуть сюда строку
+              ;; (vl-catch-all-apply 'vla-Update (list tbl)).
               (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
                                   (list tbl :vlax-false))
-              (vl-catch-all-apply 'vla-Update (list tbl))
               (setq t3 (getvar "MILLISECS"))
               (if (not *mark:batch-undo*)
                 (mark:ax-invoke-ok doc "EndUndoMark" nil))
