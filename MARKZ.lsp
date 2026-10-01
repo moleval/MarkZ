@@ -3453,6 +3453,12 @@
 ;; («Рядовка горизонтальная В-7»), поэтому прогоны разных витражей
 ;; друг другу не мешают; legacy-группы без суффикса (созданы до
 ;; 48.28) не трогаются вовсе.
+(setq *mark:ar-group-seq* 0)
+(defun mark:ar-new-group-name (base / n)
+  (setq *mark:ar-group-seq* (1+ *mark:ar-group-seq*)
+        n (getvar "MILLISECS"))
+  (strcat base " [MARKZ-" (itoa n) "-" (itoa *mark:ar-group-seq*) "]"))
+
 (defun mark:ar-make-group (name enames / doc groups old grp arr i n cnt)
   (if (and enames (> (length enames) 1))
     (progn
@@ -3462,10 +3468,10 @@
         (mark:out "[WARN] Groups недоступны.")
         (progn
           ;; существующая группа — добавить в неё, не пересоздавать
-          (setq old (mark:ax-invoke groups "Item" name)
-                grp (if old
-                      old
-                      (vl-catch-all-apply 'vla-Add (list groups name))))
+          ;; Always create a fresh group; never append to a previous run.
+          (setq name (mark:ar-new-group-name name)
+                old  nil
+                grp  (vl-catch-all-apply 'vla-Add (list groups name)))
           (cond
             ((vl-catch-all-error-p grp)
              (mark:out (strcat "[WARN] Группа \"" name "\": "
