@@ -947,13 +947,27 @@
     ((wcmatch u "*ÊÏÑ344*") "ÊÏÑ 344")
     (t nil)))
 
+(defun mk:article-from-bases (style / key best bestlen b pair art ak)
+  (setq key (mk:squash style) best nil bestlen 0)
+  (if (> (strlen key) 0)
+    (foreach b *mk:size-bases*
+      (foreach pair (cdr b)
+        (setq art (car pair) ak (mk:squash art))
+        (if (and (> (strlen ak) 0)
+                 (>= (strlen key) (strlen ak))
+                 (> (strlen ak) bestlen)
+                 (mk:str-in? ak key))
+          (setq best art bestlen (strlen ak))))))
+  best)
+
 (defun mk:ent-article (e / ed a nm ly)
   (setq ed (if e (entget e) nil) a nil)
   (if ed
     (progn
       (setq nm (if (= (cdr (assoc 0 ed)) "MLINE") (cdr (assoc 2 ed)) nil)
             ly (cdr (assoc 8 ed)))
-      (if nm (setq a (mk:mline-style-article nm)))
+      (if nm (setq a (mk:article-from-bases nm)))
+      (if (and (null a) nm) (setq a (mk:mline-style-article nm)))
       (if (and (null a) nm) (setq a (mk:article-from-name nm)))
       (if (null a) (setq a (mk:article-from-name ly)))
       (if (and (null a) nm) (setq a (mk:article-guess nm)))
