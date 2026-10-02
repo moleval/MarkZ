@@ -4295,14 +4295,13 @@
 ;;;=====================================================================
 ;; Подхват файла MarkV-bases.lsp (рядом с модулем или в путях поиска AutoCAD)
 (defun mk:load-bases (/ f res)
-  (setq f (or (findfile *mk:bases-file*)
-              (findfile "D:/MarkZ/MarkV-bases.lsp")))
+  (setq f (findfile *mk:bases-file*))
   (if f
     (progn
       (setq res (vl-catch-all-apply 'load (list f)))
       (if (vl-catch-all-error-p res)
         (prompt (strcat "\n  [WARN] Файл баз не загружен: " f))
-        (prompt (strcat "\n  [OK] Внешняя база загружена: " f)))))
+        (prompt (strcat "\n  [OK] Базы профилей: " f)))))
   f)
 
 (defun c:МАРКАВБАЗЫ (/ n)
