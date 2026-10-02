@@ -704,10 +704,13 @@
       (setq attrs (cdr (assoc 'ATTRS vitrage)))
       (foreach attr attrs (if (mk:name= (car attr) *mk:attr-vitrage*) (setq prefix (cdr attr))))
       (if (and (null prefix) attrs) (setq prefix (cdr (car attrs))))))
-  (if (null vitrage)
-    (progn
-      (prompt "\n  Блок атрибутов не выбран. Введите префикс витража или нажмите Enter: ")
-      (setq prefix (getstring T))))
+  (if vitrage
+    (setq *mk:no-vitrage-prompted* nil)
+    (if (null *mk:no-vitrage-prompted*)
+      (progn
+        (prompt "\n  Блок атрибутов не выбран. Введите префикс витража или нажмите Enter: ")
+        (setq prefix (getstring T)
+              *mk:no-vitrage-prompted* t))))
   (if (mk:strp prefix) prefix ""))
 
 ;;;=====================================================================
