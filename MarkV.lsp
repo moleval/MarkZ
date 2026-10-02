@@ -4294,12 +4294,9 @@
 ;;; 20b. ВНЕШНИЕ БАЗЫ ПРОФИЛЬНЫХ СИСТЕМ
 ;;;=====================================================================
 ;; Подхват файла MarkV-bases.lsp (рядом с модулем или в путях поиска AutoCAD)
-(defun mk:load-bases (/ f res src dir)
-  (setq src (findfile "MarkV.lsp")
-        dir (if src (vl-filename-directory src) nil)
-        f (or (findfile *mk:bases-file*)
-              (if dir (findfile (strcat dir "\\" *mk:bases-file*)) nil)
-              (findfile (strcat "D:/MarkZ/" *mk:bases-file*))))
+(defun mk:load-bases (/ f res)
+  (setq f (or (findfile *mk:bases-file*)
+              (findfile "D:/MarkZ/MarkV-bases.lsp")))
   (if f
     (progn
       (setq res (vl-catch-all-apply 'load (list f)))
