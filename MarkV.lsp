@@ -194,7 +194,7 @@
 (setq *mk:join-posts-gap*       0.0)
 (setq *mk:join-beams-gap*       0.0)
 ;; Выноски марок для элементов без атрибута «Марка»
-(setq *mk:layer-label*          "Маркировка")    ; слой выносок
+(setq *mk:layer-label*          "Маркировка")    ; слой текстовых марок стоек и ригелей
 (setq *mk:layer-table*          "Размеры")       ; слой таблиц
 (setq *mk:group-label*          "Марки_выноски")  ; группа выносок
 (setq *mk:label-color*          2)                ; жёлтый
@@ -2709,7 +2709,7 @@
 
 ;; Собрать все выноски чертежа в группу
 (defun mk:group-labels (/ ss i lst)
-  (setq ss (ssget "_X" (list (cons 8 *mk:layer-label*) (cons 0 "TEXT"))) lst nil)
+(setq *mk:layer-label*          "Маркировка")    ; слой текстовых марок стоек и ригелей
   (if ss
     (progn
       (setq i 0)
