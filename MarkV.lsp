@@ -2709,14 +2709,17 @@
 
 ;; Собрать все выноски чертежа в группу
 (defun mk:group-labels (/ ss i lst)
-(setq *mk:layer-label*          "Маркировка")    ; слой текстовых марок стоек и ригелей
+  (setq ss (ssget "_X" (list (cons 8 *mk:layer-label*) (cons 0 "TEXT")))
+        lst nil)
   (if ss
     (progn
       (setq i 0)
       (repeat (sslength ss)
-        (setq lst (cons (ssname ss i) lst))
-        (setq i (1+ i)))
-      (mk:make-group (strcat "Маркировка_" (mk:get-vitrage-prefix)) (reverse lst))))
+        (setq lst (cons (ssname ss i) lst)
+              i (1+ i)))
+      (mk:make-group
+        (strcat "Маркировка_" (mk:get-vitrage-prefix))
+        (reverse lst))))
   (if ss (sslength ss) 0))
 
 (defun mk:write-marks (elements mark-str / count skip-count lab-count e)
