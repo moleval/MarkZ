@@ -678,59 +678,37 @@
 ;; Блок «Атрибуты витража»: сначала в текущей выборке, затем по чертежу.
 ;; На чертеже с несколькими витражами это не даёт взять чужой префикс.
 (defun mk:read-vitrage-block-scan (/ ss n lst pt e)
-  (setq ss (if *mk:last-ss*
-             (if (vl-catch-all-error-p
-                   (setq n (vl-catch-all-apply 'sslength (list *mk:last-ss*))))
-               nil *mk:last-ss*)
-             nil))
-  (setq lst (if ss (mk:vitrage-blocks ss) nil))
-  (setq pt  (if ss (mk:ss-center ss) nil))
+  (setq ss (if *mk:last-ss* *mk:last-ss* nil)
+        lst (if ss (mk:vitrage-blocks ss) nil)
+        pt (if ss (mk:ss-center ss) nil))
   (cond
-    ((= (length lst) 1)
-     (setq *mk:vitrage-src* "выборка")
-     (setq e (car lst)))
+    ((= (length lst) 1) (setq *mk:vitrage-src* "выборка" e (car lst)))
     ((> (length lst) 1)
      (setq *mk:vitrage-src* "выборка, ближайший")
-     (prompt (strcat "\n  [WARN] В выборке блоков «" *mk:block-vitrage* "»: "
-                     (itoa (length lst)) " — взят ближайший к центру выборки."))
+     (prompt (strcat "\n  [WARN] В выборке несколько блоков «" *mk:block-vitrage* "». Взят ближайший."))
      (setq e (mk:nearest-insert lst pt)))
     (t
-     (setq lst (mk:vitrage-blocks nil))
-     (cond
-       ((null lst) (setq *mk:vitrage-src* "не найден") (setq e nil))
-       ((= (length lst) 1)
-        (setq *mk:vitrage-src* "чертёж")
-        (prompt (strcat "\n  [WARN] Блок «" *mk:block-vitrage*
-                        "» в выборку не попал — взят единственный в чертеже."))
-        (setq e (car lst)))
-       (t
-        (setq *mk:vitrage-src* "чертёж, ближайший")
-        (prompt (strcat "\n  [WARN] Блок «" *mk:block-vitrage*
-                        "» в выборку не попал; в чертеже их " (itoa (length lst))
-                        " — взят ближайший к выборке. Включите нужный блок в рамку!"))
-        (setq e (mk:nearest-insert lst pt))))))
+     (setq *mk:vitrage-src* "не выбран" e nil)
+     (prompt (strcat "\n  [WARN] Блок «" *mk:block-vitrage* "» не выбран в текущей области."))))
   (mk:vitrage-rec e))
 
-;; Кэш на время команды: сбрасывается вместе с *mk:dyn-cache*
 (defun mk:read-vitrage-block ()
   (if (null *mk:vitrage-cache*)
     (setq *mk:vitrage-cache* (list (mk:read-vitrage-block-scan))))
   (car *mk:vitrage-cache*))
 
 (defun mk:get-vitrage-prefix (/ vitrage attrs prefix)
-  (setq vitrage (mk:read-vitrage-block))
+  (setq vitrage (mk:read-vitrage-block) prefix nil)
   (if vitrage
     (progn
       (setq attrs (cdr (assoc 'ATTRS vitrage)))
-      (foreach attr attrs
-        (if (mk:name= (car attr) *mk:attr-vitrage*)
-          (setq prefix (cdr attr))))
-      (if (and (null prefix) attrs)
-        (setq prefix (cdr (car attrs))))))
+      (foreach attr attrs (if (mk:name= (car attr) *mk:attr-vitrage*) (setq prefix (cdr attr))))
+      (if (and (null prefix) attrs) (setq prefix (cdr (car attrs))))))
   (if (null vitrage)
-    (prompt (strcat "\n  [WARN] Блок «" *mk:block-vitrage*
-                    "» не найден — префикс по умолчанию «В-1».")))
-  (if (mk:strp prefix) prefix "В-1"))
+    (progn
+      (prompt "\n  Блок атрибутов не выбран. Введите префикс витража или нажмите Enter: ")
+      (setq prefix (getstring T))))
+  (if (mk:strp prefix) prefix ""))
 
 ;;;=====================================================================
 ;;; 8. ИЗВЛЕЧЕНИЕ МУЛЬТИЛИНИЙ
