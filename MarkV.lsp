@@ -4104,6 +4104,36 @@
 (setq *mk:leg-sfx* nil)
 (setq *mk:leg-arts* nil)
 
+(defun mk:csv-num (v / txt)
+  (setq txt (rtos v 2 2))
+  (vl-string-subst "," "." txt))
+
+(defun mk:tab-csv (agg file / f r n prev section cnt total total-m)
+  (setq f (open file "w") n 1 prev nil cnt 0 total 0.0 total-m 0.0)
+  (if f
+    (progn
+      (write-line "№;Артикул;Марка;Длина, мм;Кол-во, шт.;Всего, м.п." f)
+      (foreach r agg
+        (if (not (equal prev (nth 0 r)))
+          (progn
+            (if prev (write-line (strcat ";;Подитог " section ";;"
+                                         (itoa cnt) ";" (mk:csv-num total)) f))
+            (setq section (if (= (nth 0 r) 1) "Стойки" "Ригели")
+                  cnt 0 total 0.0 prev (nth 0 r))))
+        (write-line (strcat (itoa n) ";" (nth 2 r) ";" (nth 3 r) ";"
+                            (rtos (nth 4 r) 2 1) ";" (itoa (nth 5 r)) ";"
+                            (mk:csv-num (mk:tab-mp (nth 4 r) (nth 5 r)))) f)
+        (setq n (1+ n) cnt (+ cnt (nth 5 r))
+              total (+ total (mk:tab-mp (nth 4 r) (nth 5 r)))
+              total-m (+ total-m (mk:tab-mp (nth 4 r) (nth 5 r)))))
+      (if prev (write-line (strcat ";;Подитог " section ";;"
+                                   (itoa cnt) ";" (mk:csv-num total)) f))
+      (write-line (strcat ";;Итого;;;" (mk:csv-num total-m)) f)
+      (close f)
+      (prompt (strcat "\n  [OK] CSV: " file))
+      t)
+    nil))
+
 (defun c:МАРКАВТАБЛ (/ ss data posts beams rows agg do-tbl do-xls file doc
                        prefix bounds acc res pt2 pt3 h h2 tbl2 suffix)
   (prompt "\n[МАРКАВТАБЛ] Ведомость профилей (стойки + ригели)...")
@@ -4163,7 +4193,14 @@
                              " Стойки ригели витража "
                              suffix
                              ".xls"))
-          (mk:tab-xls agg file acc)))
+          (setq res (vl-catch-all-apply 'mk:tab-xls (list agg file acc)))
+          (if (or (vl-catch-all-error-p res) (not res))
+            (progn
+              (prompt "\n  [WARN] XLS не создан, используется резервный CSV.")
+              (setq file (strcat (getvar "dwgprefix")
+                                 (vl-filename-base (getvar "dwgname"))
+                                 " Стойки ригели витража " suffix ".csv"))
+              (mk:tab-csv agg file))))
       (if do-tbl
         (progn
           (setq res (mk:tab-create agg))
@@ -4187,7 +4224,7 @@
               (mk:leg-table-create *mk:leg-sfx* *mk:leg-arts* pt3)))))
       (mk:undo-end doc)
       (prompt "\n[ГОТОВО] Ведомость сформирована.")))
-  (princ))
+  (princ)))
 
 ;;;=====================================================================
 ;;; 20b. ПАКЕТНЫЙ ПРОГОН — МАРКАВ
