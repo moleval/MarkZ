@@ -714,7 +714,8 @@
               *mk:no-vitrage-prompted* t))))
   (if (and (null vitrage) (null prefix) (mk:strp *mk:manual-vitrage-prefix*))
     (setq prefix *mk:manual-vitrage-prefix*))
-  (if (mk:strp prefix) prefix ""))
+  (setq *mk:current-vitrage-prefix* (if (mk:strp prefix) prefix ""))
+  *mk:current-vitrage-prefix*)
 
 ;;;=====================================================================
 ;;; 8. ÈÇÂËÅ×ÅÍÈÅ ÌÓËÜÒÈËÈÍÈÉ
