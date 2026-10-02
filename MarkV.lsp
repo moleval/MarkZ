@@ -4237,7 +4237,7 @@
   (prompt (strcat "\n[МАРКАВ] Пакетный прогон, Ред. " *mk:ver* "."))
   (prompt "\n  Этапы: сбор и сетка -> марки стоек -> марки ригелей -> ведомость.")
   (setq *mk:batch* nil *mk:batch-ss* nil *mk:batch-mode* nil)
-  (setq *mk:dyn-cache* nil *mk:vitrage-cache* nil *mk:allowance-unknown* nil)
+  (setq *mk:dyn-cache* nil *mk:vitrage-cache* nil *mk:no-vitrage-prompted* nil *mk:allowance-unknown* nil)
   (prompt "\nВыберите элементы витража (рамкой): ")
   (setq ss (ssget))
   (if (null ss)
