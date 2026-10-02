@@ -2708,19 +2708,23 @@
       (> n 0))))
 
 ;; Собрать все выноски чертежа в группу
-(defun mk:group-labels (/ ss i lst)
-  (setq ss (ssget "_X" (list (cons 8 *mk:layer-label*) (cons 0 "TEXT")))
+(defun mk:group-labels (/ ss i lst e d txt prefix)
+  (setq prefix (mk:get-vitrage-prefix)
+        ss (ssget "_X" (list (cons 8 *mk:layer-label*) (cons 0 "TEXT")))
         lst nil)
   (if ss
     (progn
       (setq i 0)
       (repeat (sslength ss)
-        (setq lst (cons (ssname ss i) lst)
-              i (1+ i)))
-      (mk:make-group
-        (strcat "Маркировка_" (mk:get-vitrage-prefix))
-        (reverse lst))))
-  (if ss (sslength ss) 0))
+        (setq e (ssname ss i)
+              d (entget e)
+              txt (cdr (assoc 1 d)))
+        (if (and (mk:strp txt)
+                 (wcmatch txt (strcat prefix " *")))
+          (setq lst (cons e lst)))
+        (setq i (1+ i)))
+      (mk:make-group (strcat "Маркировка_" prefix) (reverse lst))))
+  (if lst (length lst) 0))
 
 (defun mk:write-marks (elements mark-str / count skip-count lab-count e)
   (setq count 0 skip-count 0 lab-count 0)
