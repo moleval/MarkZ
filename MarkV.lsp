@@ -2716,7 +2716,7 @@
       (repeat (sslength ss)
         (setq lst (cons (ssname ss i) lst))
         (setq i (1+ i)))
-      (mk:make-group *mk:group-label* (reverse lst))))
+      (mk:make-group (strcat "Маркировка_" (mk:get-vitrage-prefix)) (reverse lst))))
   (if ss (sslength ss) 0))
 
 (defun mk:write-marks (elements mark-str / count skip-count lab-count e)
