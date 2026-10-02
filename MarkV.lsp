@@ -76,7 +76,7 @@
 ;; Путь к исходнику: несколько кандидатов + findfile (донор: mark:find-source)
 (defun mk:find-source (/ cand out)
   (setq out nil)
-  (foreach cand (list "D:/MarkV.lsp" "D:/MarkZV/MarkV.lsp"
+  (foreach cand (list "D:/MarkZ/MarkV.lsp" "D:/MarkV.lsp" "D:/MarkZV/MarkV.lsp"
                       "C:/Work/MarkZV/MarkV.lsp" "MarkV.lsp")
     (if (and (null out) (findfile cand))
       (setq out (findfile cand))))
