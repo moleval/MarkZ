@@ -4273,9 +4273,6 @@
       ;; --- 4/4 ведомость
       (prompt "\n\n===== [ЭТАП 4/4] МАРКАВТАБЛ =====")
       (c:МАРКАВТАБЛ)
-      (if (> (mk:group-labels) 0)
-        (prompt (strcat "\n  [INFO] Выноски марок собраны в группу "
-                        *mk:group-label* ".")))
       (setq *mk:batch* nil *mk:batch-ss* nil *mk:batch-mode* nil)
       (if doc (vl-catch-all-apply 'vlax-invoke-method (list doc "EndUndoMark")))
       (prompt "\n\n[ГОТОВО] Пакет МАРКАВ завершён. Откат всего пакета — один U.")))
