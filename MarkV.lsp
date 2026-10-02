@@ -936,13 +936,25 @@
 
 ;; Артикул источника: имя стиля мультилинии (DXF 2), иначе имя слоя;
 ;; сначала явный разбор, затем подбор по базам
+(defun mk:mline-style-article (style / u)
+  (setq u (if (mk:strp style) (strcase style) ""))
+  (cond
+    ((wcmatch u "*КП45372*") "КП45372")
+    ((wcmatch u "*КП45551*") "КП45551")
+    ((wcmatch u "*КП45303*") "КП45303")
+    ((wcmatch u "*КП45369*") "КП45369")
+    ((wcmatch u "*КПС900*") "КПС 900")
+    ((wcmatch u "*КПС344*") "КПС 344")
+    (t nil)))
+
 (defun mk:ent-article (e / ed a nm ly)
   (setq ed (if e (entget e) nil) a nil)
   (if ed
     (progn
       (setq nm (if (= (cdr (assoc 0 ed)) "MLINE") (cdr (assoc 2 ed)) nil)
             ly (cdr (assoc 8 ed)))
-      (if nm (setq a (mk:article-from-name nm)))
+      (if nm (setq a (mk:mline-style-article nm)))
+      (if (and (null a) nm) (setq a (mk:article-from-name nm)))
       (if (null a) (setq a (mk:article-from-name ly)))
       (if (and (null a) nm) (setq a (mk:article-guess nm)))
       (if (null a) (setq a (mk:article-guess ly)))))
