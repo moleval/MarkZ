@@ -710,7 +710,10 @@
       (progn
         (prompt "\n  Блок атрибутов не выбран. Введите префикс витража или нажмите Enter: ")
         (setq prefix (getstring T)
+              *mk:manual-vitrage-prefix* prefix
               *mk:no-vitrage-prompted* t))))
+  (if (and (null vitrage) (null prefix) (mk:strp *mk:manual-vitrage-prefix*))
+    (setq prefix *mk:manual-vitrage-prefix*))
   (if (mk:strp prefix) prefix ""))
 
 ;;;=====================================================================
@@ -4237,7 +4240,7 @@
   (prompt (strcat "\n[МАРКАВ] Пакетный прогон, Ред. " *mk:ver* "."))
   (prompt "\n  Этапы: сбор и сетка -> марки стоек -> марки ригелей -> ведомость.")
   (setq *mk:batch* nil *mk:batch-ss* nil *mk:batch-mode* nil)
-  (setq *mk:dyn-cache* nil *mk:vitrage-cache* nil *mk:no-vitrage-prompted* nil *mk:allowance-unknown* nil)
+  (setq *mk:dyn-cache* nil *mk:vitrage-cache* nil *mk:no-vitrage-prompted* nil *mk:manual-vitrage-prefix* nil *mk:allowance-unknown* nil)
   (prompt "\nВыберите элементы витража (рамкой): ")
   (setq ss (ssget))
   (if (null ss)
