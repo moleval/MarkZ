@@ -161,7 +161,7 @@ MARKZ.lsp
 ## Требования
 
 - AutoCAD с Visual LISP / ActiveX.
-- Исходник в UTF-8 (кириллица в сообщениях и именах).
+- `MARKZ.lsp` хранится в CP1251 (Windows-1251), без BOM; `README.md` хранится в UTF-8 без BOM.
 - Не использовать запрещённые конструкции (см. AGENTS.md).
 
 ---
