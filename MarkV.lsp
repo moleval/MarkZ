@@ -4496,9 +4496,6 @@
 ;;;=====================================================================
 ;;; 21. ИНИЦИАЛИЗАЦИЯ С АВТОПРОВЕРКОЙ
 ;;;=====================================================================
-(defun mk:ljust (s w / d)
-  (setq s (if (mk:strp s) s "") d (- w (strlen s)))
-  (if (> d 0) (strcat s (substr "                                                            " 1 d)) s))
 (defun mk:repeat (ch n / out)
   (setq out "")
   (repeat n (setq out (strcat out ch)))
@@ -4512,5 +4509,18 @@
   (prompt (strcat "\n  +" (mk:repeat "-" 21) "+" (mk:repeat "-" 52) "+")))
 (defun mk:help-header ()
   (prompt (strcat "\n  | " (mk:ljust "КОМАНДА" 21) " | " (mk:ljust "ЧТО ДЕЛАЕТ" 52) " |")))
+(prompt (strcat "\n[MarkV] Ред. " *mk:ver* " / build " *mk:build* " загружена."))
+(mk:help-border)
+(mk:help-header)
+(mk:help-border)
+(mk:help-row "МАРКАВ" "Пакет: геометрия -> стойки -> ригели -> ведомость")
+(mk:help-row "МАРКАВГЕОМЕТРИЯ" "Сбор данных и построение 2D модели")
+(mk:help-row "МАРКАВСТ" "Маркировка стоек")
+(mk:help-row "МАРКАВРГ" "Маркировка ригелей")
+(mk:help-row "МАРКАВТАБЛ" "Ведомость: таблица в чертеже + XLS")
+(mk:help-row "МАРКАВДИАГНОЗ" "Диагностика блока и атрибутов")
+(mk:help-row "МАРКАВБАЗЫ" "Список баз профильных систем")
+(mk:help-row "МАРКАВСКОБКИ" "Проверка баланса скобок")
+(mk:help-border)
 (mk:load-bases)
 (princ)
