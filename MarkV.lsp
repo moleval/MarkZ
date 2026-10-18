@@ -4497,7 +4497,7 @@
 ;;; 21. ÈÍÈÖÈÀËÈÇÀÖÈß Ñ ÀÂÒÎÏÐÎÂÅÐÊÎÉ
 ;;;=====================================================================
 (defun mk:ljust (s w / d)
-  (setq s (if (stringp s) s "") d (- w (strlen s)))
+  (setq s (if (mk:strp s) s "") d (- w (strlen s)))
   (if (> d 0) (strcat s (substr "                                                            " 1 d)) s))
 (defun mk:help-row (cmd desc)
   (prompt (strcat "\n  | " (mk:ljust cmd 24) " | " (mk:ljust desc 40) " |")))
