@@ -4552,6 +4552,34 @@
                 (mk:diag-bulk-line f (strcat "  Attribute " (if tag tag "<no tag>") " = " (if val val "<empty>")))))
             (setq q (entnext q))))))))
 
+(defun mk:diag-layout (f ss / i e d o n p typ xs ys x y sx sy)
+  (mk:diag-bulk-line f "")
+  (mk:diag-bulk-line f "=== РАСКЛАДКА ВИТРАЖЕЙ ПО КООРДИНАТАМ ===")
+  (setq i 0 xs nil ys nil)
+  (while (< i (sslength ss))
+    (setq e (ssname ss i) d (entget e) typ (cdr (assoc 0 d)))
+    (if (= typ "INSERT")
+      (progn
+        (setq p (cdr (assoc 10 d)) o (vlax-ename->vla-object e))
+        (if p
+          (progn
+            (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (vla-get-EffectiveName o) ""))
+            (if (= n "Стойка (вертикальный профиль)") (setq xs (cons (car p) xs)))
+            (if (= n "Ригель (горизонтальный профиль)") (setq ys (cons (cadr p) ys))))))
+    (setq i (1+ i)))
+  (setq sx (vl-sort xs '<) sy (vl-sort ys '<))
+  (mk:diag-bulk-line f (strcat "Вертикальные оси стоек: " (itoa (length sx))))
+  (setq i 1)
+  (foreach x sx
+    (mk:diag-bulk-line f (strcat "  S" (if (< i 10) "0" "") (itoa i) "  X=" (rtos x 2 2)))
+    (setq i (1+ i)))
+  (mk:diag-bulk-line f (strcat "Горизонтальные ряды ригелей: " (itoa (length sy))))
+  (setq i 1)
+  (foreach y sy
+    (mk:diag-bulk-line f (strcat "  R" (if (< i 10) "0" "") (itoa i) "  Y=" (rtos y 2 2)))
+    (setq i (1+ i)))
+  (mk:diag-bulk-line f "Примечание: ячейки определяются между соседними осями стоек и рядами ригелей."))
+
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
   (vl-load-com)
@@ -4594,6 +4622,7 @@
       (mk:diag-bulk-line f "Layers:")
       (foreach x (reverse layers)
         (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+      (mk:diag-layout f ss)
       (if f (close f))
       (prompt "\n[OK] Отчёт: D:/MARKZV_DIAG_ALL.txt"))
     (prompt "\n[INFO] Объекты не выбраны."))
