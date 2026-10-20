@@ -4497,46 +4497,31 @@
   (if f (write-line text f))
   (prompt (strcat "\n" text)))
 
-(defun c:MARKVBULKDIAG (/ ss f i e d typ key counts styles blocks layers)
+(defun mk:diag-inc (key alist / hit)
+  (if (null key) alist
+    (if (setq hit (assoc key alist))
+      (subst (cons key (1+ (cdr hit))) hit alist)
+      (cons (cons key 1) alist))))
+
+(defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[ћј– ј¬ƒ»ј√Ќќ«ќѕ“ќћ] ћассова€ диагностика выбранных объектов...")
   (setq ss (ssget))
-  (if (null ss)
-    (prompt "\n[INFO] ќбъекты не выбраны.")
+  (if ss
     (progn
       (setq f (open "D:/MARKZV_DIAG_ALL.txt" "w")
             i 0 counts nil styles nil blocks nil layers nil)
       (mk:diag-bulk-line f "=== MARKV BULK DIAGNOSTICS ===")
       (mk:diag-bulk-line f (strcat "Selected objects: " (itoa (sslength ss))))
       (while (< i (sslength ss))
-        (setq e (ssname ss i) d (entget e)
-              typ (cdr (assoc 0 d))
-              key (if typ typ "<nil>"))
-        (if (assoc key counts)
-          (setq counts (subst (cons key (1+ (cdr (assoc key counts))))
-                              (assoc key counts) counts))
-          (setq counts (cons (cons key 1) counts)))
+        (setq e (ssname ss i)
+              d (entget e)
+              typ (cdr (assoc 0 d)))
+        (setq counts (mk:diag-inc typ counts)
+              layers (mk:diag-inc (cdr (assoc 8 d)) layers))
         (if (= typ "MLINE")
-          (progn
-            (setq key (cdr (assoc 2 d)))
-            (if key
-              (if (assoc key styles)
-                (setq styles (subst (cons key (1+ (cdr (assoc key styles))))
-                                    (assoc key styles) styles))
-                (setq styles (cons (cons key 1) styles)))))
+          (setq styles (mk:diag-inc (cdr (assoc 2 d)) styles)))
         (if (= typ "INSERT")
-          (progn
-            (setq key (cdr (assoc 2 d)))
-            (if key
-              (if (assoc key blocks)
-                (setq blocks (subst (cons key (1+ (cdr (assoc key blocks))))
-                                    (assoc key blocks) blocks))
-                (setq blocks (cons (cons key 1) blocks)))))
-        (setq key (cdr (assoc 8 d)))
-        (if key
-          (if (assoc key layers)
-            (setq layers (subst (cons key (1+ (cdr (assoc key layers))))
-                                (assoc key layers) layers))
-            (setq layers (cons (cons key 1) layers))))
+          (setq blocks (mk:diag-inc (cdr (assoc 2 d)) blocks)))
         (setq i (1+ i)))
       (mk:diag-bulk-line f "")
       (mk:diag-bulk-line f "Object types:")
@@ -4559,9 +4544,10 @@
       (foreach x (reverse layers)
         (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
       (if f (close f))
-      (prompt "\n[OK] ќтчЄт: D:/MARKZV_DIAG_ALL.txt")))
+      (prompt "\n[OK] ќтчЄт: D:/MARKZV_DIAG_ALL.txt"))
+    (prompt "\n[INFO] ќбъекты не выбраны."))
   (princ))
-))
+
 (defun c:ћј– ј¬ƒ»ј√Ќќ«ќѕ“ќћ () (c:MARKVBULKDIAG))
 
 ;;;=====================================================================
