@@ -4503,6 +4503,31 @@
       (subst (cons key (1+ (cdr hit))) hit alist)
       (cons (cons key 1) alist))))
 
+(defun mk:diag-bulk-object (f e d idx / q qd tag val p)
+  (mk:diag-bulk-line f (strcat "Object #" (itoa idx) " HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")))
+  (mk:diag-bulk-line f (strcat "  Type: " (if (cdr (assoc 0 d)) (cdr (assoc 0 d)) "<none>")))
+  (mk:diag-bulk-line f (strcat "  Layer: " (if (cdr (assoc 8 d)) (cdr (assoc 8 d)) "<none>")))
+  (if (assoc 2 d) (mk:diag-bulk-line f (strcat "  Name: " (cdr (assoc 2 d)))))
+  (if (assoc 10 d)
+    (progn
+      (setq p (cdr (assoc 10 d)))
+      (mk:diag-bulk-line f (strcat "  Insert: " (rtos (car p) 2 3) ", " (rtos (cadr p) 2 3) ", " (rtos (if (caddr p) (caddr p) 0.0) 2 3)))))
+  (if (assoc 50 d) (mk:diag-bulk-line f (strcat "  Rotation: " (rtos (cdr (assoc 50 d)) 2 4))))
+  (if (assoc 41 d) (mk:diag-bulk-line f (strcat "  ScaleX: " (rtos (cdr (assoc 41 d)) 2 4))))
+  (if (= (cdr (assoc 0 d)) "INSERT")
+    (progn
+      (setq q (if (= (cdr (assoc 66 d)) 1) (entnext e)))
+      (while q
+        (setq qd (entget q))
+        (if (= (cdr (assoc 0 qd)) "SEQEND")
+          (setq q nil)
+          (progn
+            (if (= (cdr (assoc 0 qd)) "ATTRIB")
+              (progn
+                (setq tag (cdr (assoc 2 qd)) val (cdr (assoc 1 qd)))
+                (mk:diag-bulk-line f (strcat "  Attribute " (if tag tag "<no tag>") " = " (if val val "<empty>")))))
+            (setq q (entnext q))))))))
+
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
   (setq ss (ssget))
@@ -4516,6 +4541,7 @@
         (setq e (ssname ss i)
               d (entget e)
               typ (cdr (assoc 0 d)))
+        (mk:diag-bulk-object f e d (1+ i))
         (setq counts (mk:diag-inc typ counts)
               layers (mk:diag-inc (cdr (assoc 8 d)) layers))
         (if (= typ "MLINE")
