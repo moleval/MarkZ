@@ -4577,7 +4577,7 @@
   (foreach y sy
     (mk:diag-bulk-line f (strcat "  R" (if (< i 10) "0" "") (itoa i) "  Y=" (rtos y 2 2)))
     (setq i (1+ i)))
-  (mk:diag-bulk-line f "Примечание: ячейки определяются между соседними осями стоек и рядами ригелей.")))
+  (mk:diag-bulk-line f "Примечание: ячейки определяются между соседними осями стоек и рядами ригелей."))
 
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
