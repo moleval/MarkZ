@@ -4597,7 +4597,7 @@
         (if (= :vlax-true (vla-get-IsDynamicBlock o))
           (setq n (vla-get-EffectiveName o))
           (setq n (cdr (assoc 2 d))))
-        (if (wcmatch n "*Двер*") (setq door n))))
+        (if (wcmatch n "*Двер*") (setq door n)))))
   (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6")
     " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2)
     " Y=" (rtos y1 2 2) ".." (rtos y2 2 2)
