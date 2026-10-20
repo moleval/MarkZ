@@ -4629,6 +4629,7 @@
           (if (wcmatch n "*Двер*") (setq door n kind "Дверь"))
           (if (wcmatch n "*Створ*") (setq door n kind "Створка"))
           (if (wcmatch n "*Окн*") (setq door n kind "Оконный блок"))
+          (if door (setq fill (strcase kind)))
           (if (wcmatch n "*Ригель*")
             (progn
               (setq article (mk:diag-attr-value e "Артикул")
