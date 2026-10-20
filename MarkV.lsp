@@ -4597,8 +4597,8 @@
         (progn
           (setq o (vlax-ename->vla-object e))
           (vla-GetBoundingBox o 'mn 'mx)
-          (setq q1 (vlax-safearray->list (vlax-variant-value mn))
-                q2 (vlax-safearray->list (vlax-variant-value mx))
+          (setq q1 (vlax-safearray->list (if (= (type mn) 'VARIANT) (vlax-variant-value mn) mn))
+                q2 (vlax-safearray->list (if (= (type mx) 'VARIANT) (vlax-variant-value mx) mx))
                 ax1 (car q1) ax2 (car q2) ay1 (cadr q1) ay2 (cadr q2))
           (if (and (< ax1 x2) (> ax2 x1) (< ay1 y2) (> ay2 y1))
             (progn
