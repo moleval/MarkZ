@@ -4608,8 +4608,8 @@
           (setq out (mk:diag-vltext (vla-get-Value pr)))))))
   out)
 
-(defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
-  (setq door nil kind "нет" article "не определён" state "не определено")
+(defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state fill d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
+  (setq door nil kind "нет" article "не определён" state "не определено" fill "не определено")
   (setq i 0)
   (repeat (sslength ss)
     (progn
@@ -4634,7 +4634,9 @@
               (setq article (mk:diag-attr-value e "Артикул")
                     state (mk:diag-dynamic-value e "Видимость1"))
               (if (null article) (setq article "не определён"))
-              (if (null state) (setq state "не определено"))))))))
+              (if (null state) (setq state "не определено"))
+              (if (wcmatch state "*с заливкой*") (setq fill "заполнение с заливкой"))
+              (if (wcmatch state "*без заливки*") (setq fill "заполнение без заливки"))))))))
       (setq i (1+ i))))
   (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6")
     " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2)
@@ -4642,7 +4644,7 @@
     " Ширина=" (rtos (- x2 x1) 2 2)
     " Высота=" (rtos (- y2 y1) 2 2)
     " Элемент=" (if door (strcat kind ": " door) "нет")
-    " Заполнение=не определено Артикул=" article " Состояние=" state)))
+    " Заполнение=" fill " Артикул=" article " Состояние=" state)))
 
 (defun mk:diag-grid-row (f ss x1 x2 ys)
   (if (cdr ys)
