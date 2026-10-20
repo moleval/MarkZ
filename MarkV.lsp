@@ -4598,6 +4598,16 @@
         (if q (setq q (entnext q))))))
   out)
 
+(defun mk:diag-dynamic-value (e wanted / o ps pr out)
+  (setq o (vlax-ename->vla-object e) out nil)
+  (if (= :vlax-true (vla-get-IsDynamicBlock o))
+    (progn
+      (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
+      (foreach pr ps
+        (if (= (strcase (vla-get-PropertyName pr)) (strcase wanted))
+          (setq out (mk:diag-vltext (vla-get-Value pr)))))))
+  out)
+
 (defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
   (setq door nil kind "нет" article "не определён" state "не определено")
   (setq i 0)
@@ -4621,8 +4631,10 @@
           (if (wcmatch n "*Окн*") (setq door n kind "Оконный блок"))
           (if (wcmatch n "*Ригель*")
             (progn
-              (setq article (mk:diag-attr-value e "Артикул"))
-              (if (null article) (setq article "не определён"))))))))
+              (setq article (mk:diag-attr-value e "Артикул")
+                    state (mk:diag-dynamic-value e "Видимость1"))
+              (if (null article) (setq article "не определён"))
+              (if (null state) (setq state "не определено"))))))))
       (setq i (1+ i))))
   (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6")
     " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2)
