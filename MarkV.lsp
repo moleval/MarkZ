@@ -4518,7 +4518,7 @@
           (foreach pr ps
             (setq pn (vla-get-PropertyName pr)
                   pv (vla-get-Value pr))
-            (mk:diag-bulk-line f (strcat "  Dynamic " pn " = " (mk:diag-vltext pv))))))))
+            (mk:diag-bulk-line f (strcat "  Dynamic " pn " = " (mk:diag-vltext pv)))))))))
 
 (defun mk:diag-bulk-object (f e d idx / q qd tag val p)
   (mk:diag-bulk-line f (strcat "Object #" (itoa idx) " HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")))
