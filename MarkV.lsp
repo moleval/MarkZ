@@ -4584,37 +4584,46 @@
   (foreach y sy
     (mk:diag-bulk-line f (strcat "  R" (if (< i 10) "0" "") (itoa i) "  Y=" (rtos y 2 2)))
     (setq i (1+ i)))
-  ;; Сетка временно отключена до отдельной проверки циклов.
+  (mk:diag-grid f ss sx sy)
   (mk:diag-bulk-line f "Примечание: ячейки строятся между соседними уникальными осями."))
 
-(defun mk:diag-grid (f ss sx sy / ix iy x1 x2 y1 y2 e d p o n door)
+(defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door d p o n)
+  (setq door nil)
+  (foreach e (vl-remove-if 'null (mapcar 'cadr (ssnamex ss)))
+    (setq d (entget e) p (cdr (assoc 10 d)))
+    (if (and p (= (cdr (assoc 0 d)) "INSERT") (> (car p) x1) (< (car p) x2) (> (cadr p) y1) (< (cadr p) y2))
+      (progn
+        (setq o (vlax-ename->vla-object e))
+        (if (= :vlax-true (vla-get-IsDynamicBlock o))
+          (setq n (vla-get-EffectiveName o))
+          (setq n (cdr (assoc 2 d))))
+        (if (wcmatch n "*Двер*") (setq door n))))
+  (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6")
+    " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2)
+    " Y=" (rtos y1 2 2) ".." (rtos y2 2 2)
+    " Ширина=" (rtos (- x2 x1) 2 2)
+    " Высота=" (rtos (- y2 y1) 2 2)
+    " Дверь=" (if door door "нет")
+    " Заполнение=не определено Артикул=не определён Состояние=не определено")))
+
+(defun mk:diag-grid-row (f ss x1 x2 ys)
+  (if (cdr ys)
+    (progn
+      (mk:diag-grid-cell f ss x1 x2 (car ys) (cadr ys))
+      (mk:diag-grid-row f ss x1 x2 (cdr ys)))))
+
+(defun mk:diag-grid-cols (f ss xs sy)
+  (if (cdr xs)
+    (progn
+      (if (< (- (cadr xs) (car xs)) 5000.0)
+        (mk:diag-grid-row f ss (car xs) (cadr xs) sy))
+      (mk:diag-grid-cols f ss (cdr xs) sy))))
+
+(defun mk:diag-grid (f ss sx sy)
   (mk:diag-bulk-line f "")
   (mk:diag-bulk-line f "=== СЕТКА ЯЧЕЕК ВИТРАЖЕЙ ===")
-  (setq ix 0)
-  (while (< ix (1- (length sx)))
-    (progn
-      (setq x1 (nth ix sx) x2 (nth (1+ ix) sx))
-      (if (< (- x2 x1) 5000.0)
-        (progn
-          (setq iy 0)
-          (while (< iy (1- (length sy)))
-            (progn
-              (setq y1 (nth iy sy) y2 (nth (1+ iy) sy) door nil e 0)
-              (while (< e (sslength ss))
-                (progn
-                  (setq d (entget (ssname ss e)) p (cdr (assoc 10 d)))
-                  (if (and p (> (car p) x1) (< (car p) x2) (> (cadr p) y1) (< (cadr p) y2) (= (cdr (assoc 0 d)) "INSERT"))
-                    (progn
-                      (setq o (vlax-ename->vla-object (ssname ss e)))
-                      (if (= :vlax-true (vla-get-IsDynamicBlock o))
-                        (setq n (vla-get-EffectiveName o))
-                        (setq n (cdr (assoc 2 d))))
-                      (if (wcmatch n "*Двер*") (setq door n)))
-                  (setq e (1+ e))))))
-              (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6") " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2) " Y=" (rtos y1 2 2) ".." (rtos y2 2 2) " Ширина=" (rtos (- x2 x1) 2 2) " Высота=" (rtos (- y2 y1) 2 2) " Дверь=" (if door door "нет") " Заполнение=не определено Артикул=не определён Состояние=не определено"))
-              (setq iy (1+ iy))))))
-      (setq ix (1+ ix))
-  ))
+  (mk:diag-grid-cols f ss sx sy)
+  (mk:diag-bulk-line f "Сетка построена по соседним уникальным осям X и уровням Y."))
 
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
