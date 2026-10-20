@@ -4503,11 +4503,29 @@
       (subst (cons key (1+ (cdr hit))) hit alist)
       (cons (cons key 1) alist))))
 
+(defun mk:diag-vltext (v)
+  (if (= (type v) 'STR) v (vl-princ-to-string v)))
+
+(defun mk:diag-dynamic (f e / o n ps pr pn pv)
+  (if (= (type e) 'ENAME)
+    (progn
+      (setq o (vlax-ename->vla-object e))
+      (if (= :vlax-true (vla-get-IsDynamicBlock o))
+        (progn
+          (setq n (vla-get-EffectiveName o))
+          (mk:diag-bulk-line f (strcat "  EffectiveName: " n))
+          (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
+          (foreach pr ps
+            (setq pn (vla-get-PropertyName pr)
+                  pv (vla-get-Value pr))
+            (mk:diag-bulk-line f (strcat "  Dynamic " pn " = " (mk:diag-vltext pv))))))))
+
 (defun mk:diag-bulk-object (f e d idx / q qd tag val p)
   (mk:diag-bulk-line f (strcat "Object #" (itoa idx) " HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")))
   (mk:diag-bulk-line f (strcat "  Type: " (if (cdr (assoc 0 d)) (cdr (assoc 0 d)) "<none>")))
   (mk:diag-bulk-line f (strcat "  Layer: " (if (cdr (assoc 8 d)) (cdr (assoc 8 d)) "<none>")))
   (if (assoc 2 d) (mk:diag-bulk-line f (strcat "  Name: " (cdr (assoc 2 d)))))
+  (if (= (cdr (assoc 0 d)) "INSERT") (mk:diag-dynamic f e))
   (if (assoc 10 d)
     (progn
       (setq p (cdr (assoc 10 d)))
@@ -4530,6 +4548,7 @@
 
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
+  (vl-load-com)
   (setq ss (ssget))
   (if ss
     (progn
