@@ -4595,7 +4595,7 @@
       (progn
         (if (and (= (cdr (assoc 0 qd)) "ATTRIB") (= (strcase (cdr (assoc 2 qd))) (strcase wanted)))
           (setq out (cdr (assoc 1 qd))))
-        (if q (setq q (entnext q)))))
+        (if q (setq q (entnext q))))))
   out)
 
 (defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
