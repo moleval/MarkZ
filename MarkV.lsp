@@ -4493,6 +4493,76 @@
     (prompt "\n[INFO] Selection cancelled."))
   (princ))
 
+(defun mk:diag-bulk-line (f text)
+  (if f (write-line text f))
+  (prompt (strcat "\n" text)))
+
+(defun c:MARKVBULKDIAG (/ ss f i e d typ key counts styles blocks layers)
+  (prompt "\n[ÌÀĞÊÀÂÄÈÀÃÍÎÇÎÏÒÎÌ] Ìàññîâàÿ äèàãíîñòèêà âûáğàííûõ îáúåêòîâ...")
+  (setq ss (ssget))
+  (if (null ss)
+    (prompt "\n[INFO] Îáúåêòû íå âûáğàíû.")
+    (progn
+      (setq f (open "D:/MARKZV_DIAG_ALL.txt" "w")
+            i 0 counts nil styles nil blocks nil layers nil)
+      (mk:diag-bulk-line f "=== MARKV BULK DIAGNOSTICS ===")
+      (mk:diag-bulk-line f (strcat "Selected objects: " (itoa (sslength ss))))
+      (while (< i (sslength ss))
+        (setq e (ssname ss i) d (entget e)
+              typ (cdr (assoc 0 d))
+              key (if typ typ "<nil>"))
+        (if (assoc key counts)
+          (setq counts (subst (cons key (1+ (cdr (assoc key counts))))
+                              (assoc key counts) counts))
+          (setq counts (cons (cons key 1) counts)))
+        (if (= typ "MLINE")
+          (progn
+            (setq key (cdr (assoc 2 d)))
+            (if key
+              (if (assoc key styles)
+                (setq styles (subst (cons key (1+ (cdr (assoc key styles))))
+                                    (assoc key styles) styles))
+                (setq styles (cons (cons key 1) styles)))))
+        (if (= typ "INSERT")
+          (progn
+            (setq key (cdr (assoc 2 d)))
+            (if key
+              (if (assoc key blocks)
+                (setq blocks (subst (cons key (1+ (cdr (assoc key blocks))))
+                                    (assoc key blocks) blocks))
+                (setq blocks (cons (cons key 1) blocks)))))
+        (setq key (cdr (assoc 8 d)))
+        (if key
+          (if (assoc key layers)
+            (setq layers (subst (cons key (1+ (cdr (assoc key layers))))
+                                (assoc key layers) layers))
+            (setq layers (cons (cons key 1) layers))))
+        (setq i (1+ i)))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "Object types:")
+      (foreach x (reverse counts)
+        (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "MLINE styles:")
+      (if styles
+        (foreach x (reverse styles)
+          (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+        (mk:diag-bulk-line f "  <none>"))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "Block names:")
+      (if blocks
+        (foreach x (reverse blocks)
+          (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+        (mk:diag-bulk-line f "  <none>"))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "Layers:")
+      (foreach x (reverse layers)
+        (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+      (if f (close f))
+      (prompt "\n[OK] Îò÷¸ò: D:/MARKZV_DIAG_ALL.txt")))
+  (princ))
+(defun c:ÌÀĞÊÀÂÄÈÀÃÍÎÇÎÏÒÎÌ () (c:MARKVBULKDIAG))
+
 ;;;=====================================================================
 ;;; 21. ÈÍÈÖÈÀËÈÇÀÖÈß Ñ ÀÂÒÎÏĞÎÂÅĞÊÎÉ
 ;;;=====================================================================
