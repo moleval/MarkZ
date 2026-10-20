@@ -4587,8 +4587,19 @@
   (mk:diag-grid f ss sx sy)
   (mk:diag-bulk-line f "Примечание: ячейки строятся между соседними уникальными осями."))
 
-(defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
-  (setq door nil kind "нет")
+(defun mk:diag-attr-value (e wanted / q qd out)
+  (setq q (entnext e) out nil)
+  (while (and q (null out))
+    (setq qd (entget q))
+    (if (= (cdr (assoc 0 qd)) "SEQEND") (setq q nil)
+      (progn
+        (if (and (= (cdr (assoc 0 qd)) "ATTRIB") (= (strcase (cdr (assoc 2 qd))) (strcase wanted)))
+          (setq out (cdr (assoc 1 qd))))
+        (if q (setq q (entnext q)))))
+  out)
+
+(defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
+  (setq door nil kind "нет" article "не определён" state "не определено")
   (setq i 0)
   (repeat (sslength ss)
     (progn
@@ -4607,7 +4618,11 @@
             (setq n (cdr (assoc 2 d))))
           (if (wcmatch n "*Двер*") (setq door n kind "Дверь"))
           (if (wcmatch n "*Створ*") (setq door n kind "Створка"))
-          (if (wcmatch n "*Окн*") (setq door n kind "Оконный блок"))))))
+          (if (wcmatch n "*Окн*") (setq door n kind "Оконный блок"))
+          (if (wcmatch n "*Ригель*")
+            (progn
+              (setq article (mk:diag-attr-value e "Артикул"))
+              (if (null article) (setq article "не определён"))))))))
       (setq i (1+ i))))
   (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6")
     " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2)
@@ -4615,7 +4630,7 @@
     " Ширина=" (rtos (- x2 x1) 2 2)
     " Высота=" (rtos (- y2 y1) 2 2)
     " Элемент=" (if door (strcat kind ": " door) "нет")
-    " Заполнение=не определено Артикул=не определён Состояние=не определено")))
+    " Заполнение=не определено Артикул=" article " Состояние=" state)))
 
 (defun mk:diag-grid-row (f ss x1 x2 ys)
   (if (cdr ys)
