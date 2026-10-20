@@ -4493,6 +4493,229 @@
     (prompt "\n[INFO] Selection cancelled."))
   (princ))
 
+(defun mk:diag-bulk-line (f text)
+  (if f (write-line text f)))
+
+(defun mk:diag-inc (key alist / hit)
+  (if (null key) alist
+    (if (setq hit (assoc key alist))
+      (subst (cons key (1+ (cdr hit))) hit alist)
+      (cons (cons key 1) alist))))
+
+(defun mk:diag-vltext (v / z)
+  (if (= (type v) 'VARIANT)
+    (setq v (vlax-variant-value v)))
+  (if (= (type v) 'SAFEARRAY)
+    (setq v (vlax-safearray->list v)))
+  (if (= (type v) 'LIST)
+    (strcat "(" (vl-princ-to-string v) ")")
+    (vl-princ-to-string v)))
+
+(defun mk:diag-dynamic (f e / o n ps pr pn pv)
+  (if (= (type e) 'ENAME)
+    (progn
+      (setq o (vlax-ename->vla-object e))
+      (if (= :vlax-true (vla-get-IsDynamicBlock o))
+        (progn
+          (setq n (vla-get-EffectiveName o))
+          (mk:diag-bulk-line f (strcat "  EffectiveName: " n))
+          (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
+          (foreach pr ps
+            (setq pn (vla-get-PropertyName pr)
+                  pv (vla-get-Value pr))
+            (mk:diag-bulk-line f (strcat "  Dynamic " pn " = " (mk:diag-vltext pv)))))))))
+
+(defun mk:diag-bulk-object (f e d idx / q qd tag val p)
+  (mk:diag-bulk-line f (strcat "Object #" (itoa idx) " HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")))
+  (mk:diag-bulk-line f (strcat "  Type: " (if (cdr (assoc 0 d)) (cdr (assoc 0 d)) "<none>")))
+  (mk:diag-bulk-line f (strcat "  Layer: " (if (cdr (assoc 8 d)) (cdr (assoc 8 d)) "<none>")))
+  (if (assoc 2 d) (mk:diag-bulk-line f (strcat "  Name: " (cdr (assoc 2 d)))))
+  (if (= (cdr (assoc 0 d)) "INSERT") (mk:diag-dynamic f e))
+  (if (assoc 10 d)
+    (progn
+      (setq p (cdr (assoc 10 d)))
+      (mk:diag-bulk-line f (strcat "  Insert: " (rtos (car p) 2 3) ", " (rtos (cadr p) 2 3) ", " (rtos (if (caddr p) (caddr p) 0.0) 2 3)))))
+  (if (assoc 50 d) (mk:diag-bulk-line f (strcat "  Rotation: " (rtos (cdr (assoc 50 d)) 2 4))))
+  (if (assoc 41 d) (mk:diag-bulk-line f (strcat "  ScaleX: " (rtos (cdr (assoc 41 d)) 2 4))))
+  (if (= (cdr (assoc 0 d)) "INSERT")
+    (progn
+      (setq q (if (= (cdr (assoc 66 d)) 1) (entnext e)))
+      (while q
+        (setq qd (entget q))
+        (if (= (cdr (assoc 0 qd)) "SEQEND")
+          (setq q nil)
+          (progn
+            (if (= (cdr (assoc 0 qd)) "ATTRIB")
+              (progn
+                (setq tag (cdr (assoc 2 qd)) val (cdr (assoc 1 qd)))
+                (mk:diag-bulk-line f (strcat "  Attribute " (if tag tag "<no tag>") " = " (if val val "<empty>")))))
+            (setq q (entnext q))))))))
+
+(defun mk:diag-unique-add (v vals / hit)
+  (setq hit nil)
+  (foreach x vals
+    (if (< (abs (- v x)) 0.01) (setq hit T)))
+  (if hit vals (cons v vals)))
+
+(defun mk:diag-layout (f ss / i e d o n p typ xs ys x y sx sy)
+  (mk:diag-bulk-line f "")
+  (mk:diag-bulk-line f "=== РАСКЛАДКА ВИТРАЖЕЙ ПО КООРДИНАТАМ ===")
+  (setq i 0 xs nil ys nil)
+  (while (< i (sslength ss))
+    (progn
+      (setq e (ssname ss i) d (entget e) typ (cdr (assoc 0 d)))
+      (if (= typ "INSERT")
+        (progn
+          (setq p (cdr (assoc 10 d)) o (vlax-ename->vla-object e))
+          (if p
+            (progn
+              (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (vla-get-EffectiveName o) ""))
+              (if (= n "Стойка (вертикальный профиль)") (setq xs (mk:diag-unique-add (car p) xs)))
+              (if (= n "Ригель (горизонтальный профиль)") (setq ys (mk:diag-unique-add (cadr p) ys)))))))
+      (setq i (1+ i))))
+  (setq sx (vl-sort xs '<) sy (vl-sort ys '<))
+  (mk:diag-bulk-line f (strcat "Вертикальные оси стоек: " (itoa (length sx))))
+  (setq i 1)
+  (foreach x sx
+    (mk:diag-bulk-line f (strcat "  S" (if (< i 10) "0" "") (itoa i) "  X=" (rtos x 2 2)))
+    (setq i (1+ i)))
+  (mk:diag-bulk-line f (strcat "Горизонтальные ряды ригелей: " (itoa (length sy))))
+  (setq i 1)
+  (foreach y sy
+    (mk:diag-bulk-line f (strcat "  R" (if (< i 10) "0" "") (itoa i) "  Y=" (rtos y 2 2)))
+    (setq i (1+ i)))
+  (mk:diag-grid f ss sx sy)
+  (mk:diag-bulk-line f "Примечание: ячейки строятся между соседними уникальными осями."))
+
+(defun mk:diag-attr-value (e wanted / q qd out)
+  (setq q (entnext e) out nil)
+  (while (and q (null out))
+    (setq qd (entget q))
+    (if (= (cdr (assoc 0 qd)) "SEQEND") (setq q nil)
+      (progn
+        (if (and (= (cdr (assoc 0 qd)) "ATTRIB") (= (strcase (cdr (assoc 2 qd))) (strcase wanted)))
+          (setq out (cdr (assoc 1 qd))))
+        (if q (setq q (entnext q))))))
+  out)
+
+(defun mk:diag-dynamic-value (e wanted / o ps pr out)
+  (setq o (vlax-ename->vla-object e) out nil)
+  (if (= :vlax-true (vla-get-IsDynamicBlock o))
+    (progn
+      (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
+      (foreach pr ps
+        (if (= (strcase (vla-get-PropertyName pr)) (strcase wanted))
+          (setq out (mk:diag-vltext (vla-get-Value pr)))))))
+  out)
+
+(defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state fill d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
+  (setq door nil kind "нет" article "не определён" state "не определено" fill "не определено")
+  (setq i 0)
+  (repeat (sslength ss)
+    (progn
+      (setq e (ssname ss i) d (entget e) p (cdr (assoc 10 d)))
+      (if (= (cdr (assoc 0 d)) "INSERT")
+        (progn
+          (setq o (vlax-ename->vla-object e))
+          (vla-GetBoundingBox o 'mn 'mx)
+          (setq q1 (vlax-safearray->list (if (= (type mn) 'VARIANT) (vlax-variant-value mn) mn))
+                q2 (vlax-safearray->list (if (= (type mx) 'VARIANT) (vlax-variant-value mx) mx))
+                ax1 (car q1) ax2 (car q2) ay1 (cadr q1) ay2 (cadr q2))
+          (if (and (< ax1 x2) (> ax2 x1) (< ay1 y2) (> ay2 y1))
+            (progn
+              (if (= :vlax-true (vla-get-IsDynamicBlock o))
+            (setq n (vla-get-EffectiveName o))
+            (setq n (cdr (assoc 2 d))))
+          (if (wcmatch n "*Двер*") (setq door n kind "Дверь"))
+          (if (wcmatch n "*Створ*") (setq door n kind "Створка"))
+          (if (wcmatch n "*Окн*") (setq door n kind "Оконный блок"))
+          (if door (setq fill (strcase kind)))
+          (if (wcmatch n "*Ригель*")
+            (progn
+              (setq article (mk:diag-attr-value e "Артикул")
+                    state (mk:diag-dynamic-value e "Видимость1"))
+              (if (null article) (setq article "не определён"))
+              (if (null state) (setq state "не определено"))
+              (if (wcmatch state "*с заливкой*") (setq fill "заполнение с заливкой"))
+              (if (wcmatch state "*без заливки*") (setq fill "заполнение без заливки"))))))))
+      (setq i (1+ i))))
+  (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6")
+    " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2)
+    " Y=" (rtos y1 2 2) ".." (rtos y2 2 2)
+    " Ширина=" (rtos (- x2 x1) 2 2)
+    " Высота=" (rtos (- y2 y1) 2 2)
+    " Элемент=" (if door (strcat kind ": " door) "нет")
+    " Заполнение=" fill " Артикул=" article " Состояние=" state)))
+
+(defun mk:diag-grid-row (f ss x1 x2 ys)
+  (if (cdr ys)
+    (progn
+      (mk:diag-grid-cell f ss x1 x2 (car ys) (cadr ys))
+      (mk:diag-grid-row f ss x1 x2 (cdr ys)))))
+
+(defun mk:diag-grid-cols (f ss xs sy)
+  (if (cdr xs)
+    (progn
+      (if (< (- (cadr xs) (car xs)) 5000.0)
+        (mk:diag-grid-row f ss (car xs) (cadr xs) sy))
+      (mk:diag-grid-cols f ss (cdr xs) sy))))
+
+(defun mk:diag-grid (f ss sx sy)
+  (mk:diag-bulk-line f "")
+  (mk:diag-bulk-line f "=== СЕТКА ЯЧЕЕК ВИТРАЖЕЙ ===")
+  (mk:diag-grid-cols f ss sx sy)
+  (mk:diag-bulk-line f "Сетка построена по соседним уникальным осям X и уровням Y."))
+
+(defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
+  (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
+  (vl-load-com)
+  (setq ss (ssget))
+  (if ss
+    (progn
+      (setq f (open "D:/MARKZV_DIAG_ALL.txt" "w")
+            i 0 counts nil styles nil blocks nil layers nil)
+      (mk:diag-bulk-line f "=== MARKV BULK DIAGNOSTICS ===")
+      (mk:diag-bulk-line f (strcat "Selected objects: " (itoa (sslength ss))))
+      (while (< i (sslength ss))
+        (setq e (ssname ss i)
+              d (entget e)
+              typ (cdr (assoc 0 d)))
+        (mk:diag-bulk-object f e d (1+ i))
+        (setq counts (mk:diag-inc typ counts)
+              layers (mk:diag-inc (cdr (assoc 8 d)) layers))
+        (if (= typ "MLINE")
+          (setq styles (mk:diag-inc (cdr (assoc 2 d)) styles)))
+        (if (= typ "INSERT")
+          (setq blocks (mk:diag-inc (cdr (assoc 2 d)) blocks)))
+        (setq i (1+ i)))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "Object types:")
+      (foreach x (reverse counts)
+        (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "MLINE styles:")
+      (if styles
+        (foreach x (reverse styles)
+          (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+        (mk:diag-bulk-line f "  <none>"))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "Block names:")
+      (if blocks
+        (foreach x (reverse blocks)
+          (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+        (mk:diag-bulk-line f "  <none>"))
+      (mk:diag-bulk-line f "")
+      (mk:diag-bulk-line f "Layers:")
+      (foreach x (reverse layers)
+        (mk:diag-bulk-line f (strcat "  " (car x) " = " (itoa (cdr x)))))
+      (mk:diag-layout f ss)
+      (if f (close f))
+      (prompt "\n[OK] Отчёт: D:/MARKZV_DIAG_ALL.txt"))
+    (prompt "\n[INFO] Объекты не выбраны."))
+  (princ))
+
+(defun c:МАРКАВДИАГНОЗОПТОМ () (c:MARKVBULKDIAG))
+
 ;;;=====================================================================
 ;;; 21. ИНИЦИАЛИЗАЦИЯ С АВТОПРОВЕРКОЙ
 ;;;=====================================================================
