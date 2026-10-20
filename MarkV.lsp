@@ -4503,8 +4503,14 @@
       (subst (cons key (1+ (cdr hit))) hit alist)
       (cons (cons key 1) alist))))
 
-(defun mk:diag-vltext (v)
-  (if (= (type v) 'STR) v (vl-princ-to-string v)))
+(defun mk:diag-vltext (v / z)
+  (if (= (type v) 'VARIANT)
+    (setq v (vlax-variant-value v)))
+  (if (= (type v) 'SAFEARRAY)
+    (setq v (vlax-safearray->list v)))
+  (if (= (type v) 'LIST)
+    (strcat "(" (vl-princ-to-string v) ")")
+    (vl-princ-to-string v)))
 
 (defun mk:diag-dynamic (f e / o n ps pr pn pv)
   (if (= (type e) 'ENAME)
