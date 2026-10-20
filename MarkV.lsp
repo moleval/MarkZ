@@ -4551,6 +4551,12 @@
                 (mk:diag-bulk-line f (strcat "  Attribute " (if tag tag "<no tag>") " = " (if val val "<empty>")))))
             (setq q (entnext q))))))))
 
+(defun mk:diag-unique-add (v vals / hit)
+  (setq hit nil)
+  (foreach x vals
+    (if (< (abs (- v x)) 0.01) (setq hit T)))
+  (if hit vals (cons v vals)))
+
 (defun mk:diag-layout (f ss / i e d o n p typ xs ys x y sx sy)
   (mk:diag-bulk-line f "")
   (mk:diag-bulk-line f "=== РАСКЛАДКА ВИТРАЖЕЙ ПО КООРДИНАТАМ ===")
@@ -4564,8 +4570,8 @@
           (if p
             (progn
               (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (vla-get-EffectiveName o) ""))
-              (if (= n "Стойка (вертикальный профиль)") (setq xs (cons (car p) xs)))
-              (if (= n "Ригель (горизонтальный профиль)") (setq ys (cons (cadr p) ys)))))))
+              (if (= n "Стойка (вертикальный профиль)") (setq xs (mk:diag-unique-add (car p) xs)))
+              (if (= n "Ригель (горизонтальный профиль)") (setq ys (mk:diag-unique-add (cadr p) ys)))))))
       (setq i (1+ i))))
   (setq sx (vl-sort xs '<) sy (vl-sort ys '<))
   (mk:diag-bulk-line f (strcat "Вертикальные оси стоек: " (itoa (length sx))))
