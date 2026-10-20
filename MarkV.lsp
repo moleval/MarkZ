@@ -4494,8 +4494,7 @@
   (princ))
 
 (defun mk:diag-bulk-line (f text)
-  (if f (write-line text f))
-  (prompt (strcat "\n" text)))
+  (if f (write-line text f)))
 
 (defun mk:diag-inc (key alist / hit)
   (if (null key) alist
