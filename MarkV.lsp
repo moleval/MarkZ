@@ -4565,7 +4565,7 @@
             (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (vla-get-EffectiveName o) ""))
             (if (= n "Стойка (вертикальный профиль)") (setq xs (cons (car p) xs)))
             (if (= n "Ригель (горизонтальный профиль)") (setq ys (cons (cadr p) ys))))))
-    (setq i (1+ i)))
+    (setq i (1+ i))))
   (setq sx (vl-sort xs '<) sy (vl-sort ys '<))
   (mk:diag-bulk-line f (strcat "Вертикальные оси стоек: " (itoa (length sx))))
   (setq i 1)
