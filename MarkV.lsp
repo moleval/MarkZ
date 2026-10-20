@@ -4610,10 +4610,10 @@
                         (setq n (vla-get-EffectiveName o))
                         (setq n (cdr (assoc 2 d))))
                       (if (wcmatch n "*Двер*") (setq door n)))
-                  (setq e (1+ e))))
+                  (setq e (1+ e))))))
               (mk:diag-bulk-line f (strcat "  ВН-" (if (< x1 10000.0) "4" "6") " Ячейка X=" (rtos x1 2 2) ".." (rtos x2 2 2) " Y=" (rtos y1 2 2) ".." (rtos y2 2 2) " Ширина=" (rtos (- x2 x1) 2 2) " Высота=" (rtos (- y2 y1) 2 2) " Дверь=" (if door door "нет") " Заполнение=не определено Артикул=не определён Состояние=не определено"))
               (setq iy (1+ iy))))))
-      (setq ix (1+ ix))))
+      (setq ix (1+ ix))
   ))
 
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
