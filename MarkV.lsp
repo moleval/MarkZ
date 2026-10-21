@@ -4595,15 +4595,12 @@
         (if q (setq q (entnext q))))))
   out)
 
-(defun mk:diag-dynamic-value (e wanted / o ps pr out)
-  (setq o (vlax-ename->vla-object e) out nil)
-  (if (= :vlax-true (vla-get-IsDynamicBlock o))
-    (progn
-      (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
-      (foreach pr ps
-        (if (= (strcase (vla-get-PropertyName pr)) (strcase wanted))
-          (setq out (mk:diag-vltext (vla-get-Value pr)))))))
-  out)
+(defun mk:diag-dynamic-value (e wanted / o)
+  (setq o (if (= (type e) 'ENAME) (vlax-ename->vla-object e) nil))
+  (if (and o (= (strcase wanted) "ВИДИМОСТЬ1"))
+    (mk:get-vis o)
+    (if o
+      (cdr (assoc wanted (mk:dyn-pairs o))))))
 
 (defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state fill d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
   (setq door nil kind "нет" article "не определён" state "не определено" fill "не определено")
