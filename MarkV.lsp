@@ -4517,7 +4517,7 @@
       (setq o (vlax-ename->vla-object e))
       (if (= :vlax-true (vla-get-IsDynamicBlock o))
         (progn
-          (setq n (vla-get-EffectiveName o))
+          (setq n (mk:ax-get o "EffectiveName"))
           (mk:diag-bulk-line f (strcat "  EffectiveName: " n))
           (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
           (foreach pr ps
@@ -4569,7 +4569,7 @@
           (setq p (cdr (assoc 10 d)) o (vlax-ename->vla-object e))
           (if p
             (progn
-              (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (vla-get-EffectiveName o) ""))
+              (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (mk:ax-get o "EffectiveName") ""))
               (if (= n "Стойка (вертикальный профиль)") (setq xs (mk:diag-unique-add (car p) xs)))
               (if (= n "Ригель (горизонтальный профиль)") (setq ys (mk:diag-unique-add (cadr p) ys)))))))
       (setq i (1+ i))))
@@ -4624,7 +4624,7 @@
           (if (and (< ax1 x2) (> ax2 x1) (< ay1 y2) (> ay2 y1))
             (progn
               (if (= :vlax-true (vla-get-IsDynamicBlock o))
-            (setq n (vla-get-EffectiveName o))
+            (setq n (mk:ax-get o "EffectiveName"))
             (setq n (cdr (assoc 2 d))))
           (if (wcmatch n "*Двер*") (setq door n kind "Дверь"))
           (if (wcmatch n "*Створ*") (setq door n kind "Створка"))
