@@ -4511,19 +4511,16 @@
     (strcat "(" (vl-princ-to-string v) ")")
     (vl-princ-to-string v)))
 
-(defun mk:diag-dynamic (f e / o n ps pr pn pv)
+(defun mk:diag-dynamic (f e / o n pr)
   (if (= (type e) 'ENAME)
     (progn
       (setq o (vlax-ename->vla-object e))
-      (if (= :vlax-true (vla-get-IsDynamicBlock o))
+      (if (mk:dynamic? o)
         (progn
           (setq n (mk:ax-get o "EffectiveName"))
           (mk:diag-bulk-line f (strcat "  EffectiveName: " n))
-          (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
-          (foreach pr ps
-            (setq pn (vla-get-PropertyName pr)
-                  pv (vla-get-Value pr))
-            (mk:diag-bulk-line f (strcat "  Dynamic " pn " = " (mk:diag-vltext pv)))))))))
+          (foreach pr (mk:dyn-pairs o)
+            (mk:diag-bulk-line f (strcat "  Dynamic " (car pr) " = " (mk:diag-vltext (cdr pr))))))))))
 
 (defun mk:diag-bulk-object (f e d idx / q qd tag val p)
   (mk:diag-bulk-line f (strcat "Object #" (itoa idx) " HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")))
