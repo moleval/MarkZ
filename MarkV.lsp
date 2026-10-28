@@ -4581,7 +4581,9 @@
   (foreach y sy
     (mk:diag-bulk-line f (strcat "  R" (if (< i 10) "0" "") (itoa i) "  Y=" (rtos y 2 2)))
     (setq i (1+ i)))
-  (mk:diag-grid f ss sx sy)
+  (if (<= (* (max 0 (1- (length sx))) (max 0 (1- (length sy)))) 1000)
+    (mk:diag-grid f ss sx sy)
+    (mk:diag-bulk-line f "Сетка пропущена: слишком много возможных ячеек; анализ объектов завершён."))
   (mk:diag-bulk-line f "Примечание: ячейки строятся между соседними уникальными осями."))
 
 (defun mk:diag-attr-value (e wanted / q qd out)
