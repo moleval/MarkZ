@@ -4660,6 +4660,28 @@
   (mk:diag-grid-cols f ss sx sy)
   (mk:diag-bulk-line f "Сетка построена по соседним уникальным осям X и уровням Y."))
 
+(defun mk:diag-walk-block (f doc block-name path depth seen / br child next)
+  (if (and block-name (< depth 20) (null (assoc block-name seen)))
+    (progn
+      (setq seen (cons (cons block-name T) seen))
+      (setq br (vl-catch-all-apply 'vla-item (list (vla-get-Blocks doc) block-name)))
+      (if (not (vl-catch-all-error-p br))
+        (vlax-for child br
+          (if (= (vla-get-ObjectName child) "AcDbBlockReference")
+            (progn
+              (setq next (mk:ax-get child "EffectiveName"))
+              (mk:diag-bulk-line f
+                (strcat "  Nested depth=" (itoa depth) " path=" path " > " next))
+              (mk:diag-walk-block f doc next (strcat path " > " next) (1+ depth) seen))))))))
+
+(defun mk:diag-nested-insert (f e / o doc n)
+  (setq o (vlax-ename->vla-object e))
+  (if (= (mk:ax-get o "ObjectName") "AcDbBlockReference")
+    (progn
+      (setq doc (vla-get-ActiveDocument (vlax-get-acad-object))
+            n (mk:ax-get o "EffectiveName"))
+      (mk:diag-walk-block f doc n n 0 nil))))
+
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
   (vl-load-com)
@@ -4675,6 +4697,7 @@
               d (entget e)
               typ (cdr (assoc 0 d)))
         (mk:diag-bulk-object f e d (1+ i))
+        (if (= typ "INSERT") (mk:diag-nested-insert f e))
         (setq counts (mk:diag-inc typ counts)
               layers (mk:diag-inc (cdr (assoc 8 d)) layers))
         (if (= typ "MLINE")
