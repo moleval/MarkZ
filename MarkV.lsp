@@ -4697,7 +4697,6 @@
               d (entget e)
               typ (cdr (assoc 0 d)))
         (mk:diag-bulk-object f e d (1+ i))
-        (if (= typ "INSERT") (mk:diag-nested-insert f e))
         (setq counts (mk:diag-inc typ counts)
               layers (mk:diag-inc (cdr (assoc 8 d)) layers))
         (if (= typ "MLINE")
