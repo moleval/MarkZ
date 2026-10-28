@@ -4554,6 +4554,23 @@
     (if (< (abs (- v x)) 0.01) (setq hit T)))
   (if hit vals (cons v vals)))
 
+(defun mk:diag-group-next (f xs start n / a b rest)
+  (if xs
+    (progn
+      (setq a (car xs) rest (cdr xs))
+      (if (and rest (< (- (car rest) a) 5000.0))
+        (mk:diag-group-next f rest start (1+ n))
+        (progn
+          (setq b a)
+          (mk:diag-bulk-line f (strcat "  Ãðóïïà " (itoa start) " X=" (rtos (if (= n 1) a b) 2 2) ".." (rtos b 2 2) " îñåé=" (itoa n)))
+          (if rest (mk:diag-group-next f rest (1+ start) 1)))))))
+
+(defun mk:diag-groups (f sx)
+  (mk:diag-bulk-line f "")
+  (mk:diag-bulk-line f "=== ËÎÊÀËÜÍÛÅ ÃÐÓÏÏÛ ÂÈÒÐÀÆÅÉ ===")
+  (if sx (mk:diag-group-next f sx 1 1)
+    (mk:diag-bulk-line f "  Ãðóïïû íå íàéäåíû.")))
+
 (defun mk:diag-layout (f ss / i e d o n p typ xs ys x y sx sy)
   (mk:diag-bulk-line f "")
   (mk:diag-bulk-line f "=== ÐÀÑÊËÀÄÊÀ ÂÈÒÐÀÆÅÉ ÏÎ ÊÎÎÐÄÈÍÀÒÀÌ ===")
@@ -4571,6 +4588,7 @@
               (if (= n "Ðèãåëü (ãîðèçîíòàëüíûé ïðîôèëü)") (setq ys (mk:diag-unique-add (cadr p) ys)))))))
       (setq i (1+ i))))
   (setq sx (vl-sort xs '<) sy (vl-sort ys '<))
+  (mk:diag-groups f sx)
   (mk:diag-bulk-line f (strcat "Âåðòèêàëüíûå îñè ñòîåê: " (itoa (length sx))))
   (setq i 1)
   (foreach x sx
