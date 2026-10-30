@@ -4687,7 +4687,7 @@
           (setq bb (mk:e-bb o))
           (if bb (setq out (cons (list e bb (mk:get-attr e "Витраж")) out))))
       (setq i (1+ i))))
-  out)
+  out))
 
 (defun c:MARKVFRAMEASSIGN (/ ss frames f i e d o n bb fr ar best besta mark)
   (vl-load-com)
