@@ -4666,6 +4666,57 @@
   (mk:diag-grid-cols f ss sx sy)
   (mk:diag-bulk-line f "Сетка построена по соседним уникальным осям X и уровням Y."))
 
+(defun mk:bb-overlap-area (a b / x1 x2 y1 y2)
+  (if (and a b)
+    (progn
+      (setq x1 (max (nth 0 a) (nth 0 b))
+            x2 (min (nth 2 a) (nth 2 b))
+            y1 (max (nth 1 a) (nth 1 b))
+            y2 (min (nth 3 a) (nth 3 b)))
+      (if (and (> x2 x1) (> y2 y1)) (* (- x2 x1) (- y2 y1)) 0.0))
+    0.0))
+
+(defun mk:frame-list (/ ss i e d o n bb out)
+  (setq ss (ssget "_X" '((0 . "INSERT"))) i 0 out nil)
+  (if ss
+    (repeat (sslength ss)
+      (setq e (ssname ss i) d (entget e) o (vlax-ename->vla-object e)
+            n (mk:ax-get o "EffectiveName"))
+      (if (= n "Атрибуты витража")
+        (progn
+          (setq bb (mk:e-bb o))
+          (if bb (setq out (cons (list e bb (mk:get-attr e "Витраж")) out))))
+      (setq i (1+ i))))
+  out)
+
+(defun c:MARKVFRAMEASSIGN (/ ss frames f i e d o n bb fr ar best besta mark)
+  (vl-load-com)
+  (prompt "\n[MARKVFRAMEASSIGN] Проверка принадлежности объектов рамкам...")
+  (setq frames (mk:frame-list) ss (ssget "_X" '((0 . "INSERT"))) i 0
+        f (open "D:/MARKV_FRAME_ASSIGN.txt" "w"))
+  (if f
+    (progn
+      (write-line "=== MARKV FRAME ASSIGNMENT ===" f)
+      (if ss
+        (repeat (sslength ss)
+          (setq e (ssname ss i) d (entget e) o (vlax-ename->vla-object e)
+                n (mk:ax-get o "EffectiveName") best nil besta 0.0)
+          (if (/= n "Атрибуты витража")
+            (progn
+              (setq bb (mk:e-bb o))
+              (foreach fr frames
+                (setq ar (mk:bb-overlap-area bb (cadr fr)))
+                (if (> ar besta) (setq besta ar best fr)))
+              (setq mark (if best (if (caddr best) (caddr best) "<без марки>") "<ВНЕ РАМОК>"))
+              (write-line (strcat "HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")
+                                  " NAME=" n " FRAME=" mark " AREA=" (rtos besta 2 2)) f)))
+          (setq i (1+ i)))
+        (write-line "NO INSERTS FOUND" f))
+      (close f)
+      (prompt "\n[OK] Привязка: D:/MARKV_FRAME_ASSIGN.txt"))
+    (prompt "\n[ERROR] Не удалось открыть отчёт."))
+  (princ))
+
 (defun c:MARKVFRAMEINFO (/ ss f i e d o n bb pr)
   (vl-load-com)
   (prompt "\n[MARKVFRAMEINFO] Сбор рамок Атрибуты витража...")
