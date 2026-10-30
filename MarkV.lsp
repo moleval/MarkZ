@@ -4722,7 +4722,7 @@
       (close f)
       (prompt "\n[OK] Привязка: D:/MARKV_FRAME_ASSIGN.txt"))
     (prompt "\n[ERROR] Не удалось открыть отчёт."))
-  (princ))
+  (princ)))
 
 (defun c:MARKVFRAMEINFO (/ ss f i e d o n bb pr)
   (vl-load-com)
