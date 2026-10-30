@@ -4689,10 +4689,10 @@
       (setq i (1+ i))))
   out))
 
-(defun c:MARKVFRAMEASSIGN (/ ss frames f i e d o n bb fr ar best besta mark counts key x)
+(defun c:MARKVFRAMEASSIGN (/ ss frames f i e d o n bb fr ar best besta mark)
   (vl-load-com)
   (prompt "\n[MARKVFRAMEASSIGN] Проверка принадлежности объектов рамкам...")
-  (setq frames (mk:frame-list) ss (ssget "_X" '((0 . "INSERT"))) i 0 counts nil
+  (setq frames (mk:frame-list) ss (ssget "_X" '((0 . "INSERT"))) i 0
         f (open "D:/MARKV_FRAME_ASSIGN.txt" "w"))
   (if f
     (progn
@@ -4707,22 +4707,15 @@
               (foreach fr frames
                 (setq ar (mk:bb-overlap-area bb (cadr fr)))
                 (if (> ar besta) (setq besta ar best fr)))
-              (setq mark (if best (if (caddr best) (caddr best) "<без марки>") "<ВНЕ РАМОК>")
-                    key (strcat mark " | " n)
-                    counts (mk:diag-inc key counts))
+              (setq mark (if best (if (caddr best) (caddr best) "<без марки>") "<ВНЕ РАМОК>"))
               (write-line (strcat "HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")
                                   " NAME=" n " FRAME=" mark " AREA=" (rtos besta 2 2)) f)))
           (setq i (1+ i)))
-        (progn
-          (write-line "NO INSERTS FOUND" f))
-      (write-line "" f)
-      (write-line "=== FRAME SUMMARY ===" f)
-      (foreach x (reverse counts)
-        (write-line (strcat "  " (car x) " = " (itoa (cdr x))) f))
+        (write-line "NO INSERTS FOUND" f))
       (close f)
       (prompt "\n[OK] Привязка: D:/MARKV_FRAME_ASSIGN.txt"))
     (prompt "\n[ERROR] Не удалось открыть отчёт."))
-  (princ)))
+  (princ))
 
 (defun c:MARKVFRAMEINFO (/ ss f i e d o n bb pr)
   (vl-load-com)
