@@ -4511,16 +4511,19 @@
     (strcat "(" (vl-princ-to-string v) ")")
     (vl-princ-to-string v)))
 
-(defun mk:diag-dynamic (f e / o n pr)
+(defun mk:diag-dynamic (f e / o n ps pr pn pv)
   (if (= (type e) 'ENAME)
     (progn
       (setq o (vlax-ename->vla-object e))
-      (if (mk:dynamic? o)
+      (if (= :vlax-true (vla-get-IsDynamicBlock o))
         (progn
-          (setq n (mk:ax-get o "EffectiveName"))
+          (setq n (vla-get-EffectiveName o))
           (mk:diag-bulk-line f (strcat "  EffectiveName: " n))
-          (foreach pr (mk:dyn-pairs o)
-            (mk:diag-bulk-line f (strcat "  Dynamic " (car pr) " = " (mk:diag-vltext (cdr pr))))))))))
+          (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
+          (foreach pr ps
+            (setq pn (vla-get-PropertyName pr)
+                  pv (vla-get-Value pr))
+            (mk:diag-bulk-line f (strcat "  Dynamic " pn " = " (mk:diag-vltext pv)))))))))
 
 (defun mk:diag-bulk-object (f e d idx / q qd tag val p)
   (mk:diag-bulk-line f (strcat "Object #" (itoa idx) " HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")))
@@ -4554,23 +4557,6 @@
     (if (< (abs (- v x)) 0.01) (setq hit T)))
   (if hit vals (cons v vals)))
 
-(defun mk:diag-group-next (f xs start n / a b rest)
-  (if xs
-    (progn
-      (setq a (car xs) rest (cdr xs))
-      (if (and rest (< (- (car rest) a) 5000.0))
-        (mk:diag-group-next f rest start (1+ n))
-        (progn
-          (setq b a)
-          (mk:diag-bulk-line f (strcat "  Группа " (itoa start) " X=" (rtos (if (= n 1) a b) 2 2) ".." (rtos b 2 2) " осей=" (itoa n)))
-          (if rest (mk:diag-group-next f rest (1+ start) 1)))))))
-
-(defun mk:diag-groups (f sx)
-  (mk:diag-bulk-line f "")
-  (mk:diag-bulk-line f "=== ЛОКАЛЬНЫЕ ГРУППЫ ВИТРАЖЕЙ ===")
-  (if sx (mk:diag-group-next f sx 1 1)
-    (mk:diag-bulk-line f "  Группы не найдены.")))
-
 (defun mk:diag-layout (f ss / i e d o n p typ xs ys x y sx sy)
   (mk:diag-bulk-line f "")
   (mk:diag-bulk-line f "=== РАСКЛАДКА ВИТРАЖЕЙ ПО КООРДИНАТАМ ===")
@@ -4583,12 +4569,11 @@
           (setq p (cdr (assoc 10 d)) o (vlax-ename->vla-object e))
           (if p
             (progn
-              (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (mk:ax-get o "EffectiveName") ""))
+              (setq n (if (= :vlax-true (vla-get-IsDynamicBlock o)) (vla-get-EffectiveName o) ""))
               (if (= n "Стойка (вертикальный профиль)") (setq xs (mk:diag-unique-add (car p) xs)))
               (if (= n "Ригель (горизонтальный профиль)") (setq ys (mk:diag-unique-add (cadr p) ys)))))))
       (setq i (1+ i))))
   (setq sx (vl-sort xs '<) sy (vl-sort ys '<))
-  (mk:diag-groups f sx)
   (mk:diag-bulk-line f (strcat "Вертикальные оси стоек: " (itoa (length sx))))
   (setq i 1)
   (foreach x sx
@@ -4599,9 +4584,7 @@
   (foreach y sy
     (mk:diag-bulk-line f (strcat "  R" (if (< i 10) "0" "") (itoa i) "  Y=" (rtos y 2 2)))
     (setq i (1+ i)))
-  (if (<= (* (max 0 (1- (length sx))) (max 0 (1- (length sy)))) 1000)
-    (mk:diag-grid f ss sx sy)
-    (mk:diag-bulk-line f "Сетка пропущена: слишком много возможных ячеек; анализ объектов завершён."))
+  (mk:diag-grid f ss sx sy)
   (mk:diag-bulk-line f "Примечание: ячейки строятся между соседними уникальными осями."))
 
 (defun mk:diag-attr-value (e wanted / q qd out)
@@ -4615,12 +4598,15 @@
         (if q (setq q (entnext q))))))
   out)
 
-(defun mk:diag-dynamic-value (e wanted / o)
-  (setq o (if (= (type e) 'ENAME) (vlax-ename->vla-object e) nil))
-  (if (and o (= (strcase wanted) "ВИДИМОСТЬ1"))
-    (mk:get-vis o)
-    (if o
-      (cdr (assoc wanted (mk:dyn-pairs o))))))
+(defun mk:diag-dynamic-value (e wanted / o ps pr out)
+  (setq o (vlax-ename->vla-object e) out nil)
+  (if (= :vlax-true (vla-get-IsDynamicBlock o))
+    (progn
+      (setq ps (vlax-invoke o 'GetDynamicBlockProperties))
+      (foreach pr ps
+        (if (= (strcase (vla-get-PropertyName pr)) (strcase wanted))
+          (setq out (mk:diag-vltext (vla-get-Value pr)))))))
+  out)
 
 (defun mk:diag-grid-cell (f ss x1 x2 y1 y2 / door kind article state fill d p o n i e mn mx q1 q2 ax1 ax2 ay1 ay2)
   (setq door nil kind "нет" article "не определён" state "не определено" fill "не определено")
@@ -4638,7 +4624,7 @@
           (if (and (< ax1 x2) (> ax2 x1) (< ay1 y2) (> ay2 y1))
             (progn
               (if (= :vlax-true (vla-get-IsDynamicBlock o))
-            (setq n (mk:ax-get o "EffectiveName"))
+            (setq n (vla-get-EffectiveName o))
             (setq n (cdr (assoc 2 d))))
           (if (wcmatch n "*Двер*") (setq door n kind "Дверь"))
           (if (wcmatch n "*Створ*") (setq door n kind "Створка"))
@@ -4680,27 +4666,36 @@
   (mk:diag-grid-cols f ss sx sy)
   (mk:diag-bulk-line f "Сетка построена по соседним уникальным осям X и уровням Y."))
 
-(defun mk:diag-walk-block (f doc block-name path depth seen / br child next)
-  (if (and block-name (< depth 20) (null (assoc block-name seen)))
+(defun c:MARKVFRAMEINFO (/ ss f i e d o n bb pr)
+  (vl-load-com)
+  (prompt "\n[MARKVFRAMEINFO] Сбор рамок Атрибуты витража...")
+  (setq f (open "D:/MARKV_FRAMES.txt" "w") ss (ssget "_X" '((0 . "INSERT"))) i 0)
+  (if f
     (progn
-      (setq seen (cons (cons block-name T) seen))
-      (setq br (vl-catch-all-apply 'vla-item (list (vla-get-Blocks doc) block-name)))
-      (if (not (vl-catch-all-error-p br))
-        (vlax-for child br
-          (if (= (vla-get-ObjectName child) "AcDbBlockReference")
+      (write-line "=== MARKV FRAME INFO ===" f)
+      (if ss
+        (repeat (sslength ss)
+          (setq e (ssname ss i) d (entget e) o (vlax-ename->vla-object e)
+                n (mk:ax-get o "EffectiveName"))
+          (if (= n "Атрибуты витража")
             (progn
-              (setq next (mk:ax-get child "EffectiveName"))
-              (mk:diag-bulk-line f
-                (strcat "  Nested depth=" (itoa depth) " path=" path " > " next))
-              (mk:diag-walk-block f doc next (strcat path " > " next) (1+ depth) seen))))))))
-
-(defun mk:diag-nested-insert (f e / o doc n)
-  (setq o (vlax-ename->vla-object e))
-  (if (= (mk:ax-get o "ObjectName") "AcDbBlockReference")
-    (progn
-      (setq doc (vla-get-ActiveDocument (vlax-get-acad-object))
-            n (mk:ax-get o "EffectiveName"))
-      (mk:diag-walk-block f doc n n 0 nil))))
+              (write-line (strcat "FRAME HANDLE=" (if (cdr (assoc 5 d)) (cdr (assoc 5 d)) "<none>")) f)
+              (write-line (strcat "  Insert=" (mk:diag-vltext (cdr (assoc 10 d)))) f)
+              (write-line (strcat "  ScaleX=" (mk:diag-vltext (cdr (assoc 41 d))) " ScaleY=" (mk:diag-vltext (cdr (assoc 42 d)))) f)
+              (write-line (strcat "  Rotation=" (mk:diag-vltext (cdr (assoc 50 d)))) f)
+              (setq bb (mk:e-bb o))
+              (if bb (write-line (strcat "  WorldBBox=" (mk:diag-vltext bb)) f))
+              (write-line (strcat "  Объект=" (if (mk:get-attr e "Объект") (mk:get-attr e "Объект") "")) f)
+              (write-line (strcat "  Витраж=" (if (mk:get-attr e "Витраж") (mk:get-attr e "Витраж") "")) f)
+              (foreach pr (mk:dyn-pairs o)
+                (write-line (strcat "  Dynamic " (car pr) " = " (mk:diag-vltext (cdr pr))) f))
+              (write-line "" f)))
+          (setq i (1+ i)))
+        (write-line "NO INSERTS FOUND" f))
+      (close f)
+      (prompt "\n[OK] Рамки: D:/MARKV_FRAMES.txt"))
+    (prompt "\n[ERROR] Не удалось открыть D:/MARKV_FRAMES.txt"))
+  (princ))
 
 (defun c:MARKVBULKDIAG (/ ss f i e d typ counts styles blocks layers x)
   (prompt "\n[МАРКАВДИАГНОЗОПТОМ] Массовая диагностика выбранных объектов...")
