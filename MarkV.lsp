@@ -4666,6 +4666,22 @@
   (mk:diag-grid-cols f ss sx sy)
   (mk:diag-bulk-line f "Сетка построена по соседним уникальным осям X и уровням Y."))
 
+(defun mk:frame-capture-bb (e / d p w h vf hf sx sy x0 x1 y0 y1)
+  (setq d (entget e) p (cdr (assoc 10 d))
+        w (mk:get-dyn (vlax-ename->vla-object e) "*Ширина рамки*")
+        h (mk:get-dyn (vlax-ename->vla-object e) "*Высота рамки*")
+        vf (mk:get-dyn (vlax-ename->vla-object e) "*Вертикаль*")
+        hf (mk:get-dyn (vlax-ename->vla-object e) "*Горизонталь*")
+        sx (if (cdr (assoc 41 d)) (cdr (assoc 41 d)) 1.0)
+        sy (if (cdr (assoc 42 d)) (cdr (assoc 42 d)) sx))
+  (if (and p (numberp w) (numberp h))
+    (progn
+      (setq x0 (car p) x1 (+ x0 (* w sx))
+            y1 (cadr p) y0 (- y1 (* h sy)))
+      (if (= vf 1) (setq x0 (car p) x1 (- (car p) (* w sx))))
+      (if (= hf 1) (setq y0 (cadr p) y1 (+ (cadr p) (* h sy))))
+      (list (min x0 x1) (min y0 y1) (max x0 x1) (max y0 y1)))))
+
 (defun mk:bb-overlap-area (a b / x1 x2 y1 y2)
   (if (and a b)
     (progn
@@ -4684,7 +4700,7 @@
             n (mk:ax-get o "EffectiveName"))
       (if (= n "Атрибуты витража")
         (progn
-          (setq bb (mk:e-bb o))
+          (setq bb (mk:frame-capture-bb e))
           (if bb (setq out (cons (list e bb (mk:get-attr e "Витраж")) out))))
       (setq i (1+ i))))
   out))
